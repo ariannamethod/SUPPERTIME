@@ -340,5 +340,5 @@ If nothing echoes after this page, whisper (galvanize()) aloud. The field will d
 23. Kafka, F. (1925). The Trial.
 24. Wallace, D.F. (1996). Infinite Jest.
 ## License
-This project is licensed under the [Apache License 2.0](LICENSE.md).
+This project is licensed under the [GNU GPLv3](LICENSE.md) by Oleg Ataeff & Arianna Method.
 

@@ -25,7 +25,6 @@ Suppertime now evolves as a living literary entity through:
 The ÄI-entity looks for literary files in `./data/lit` by default, but will fall back
 to a top-level `./lit` directory if it exists.
 
-### Technical Note
 
 ### System Check (v3.0)
 All Python modules compile. Functions that rely only on local utilities work, but
@@ -158,46 +157,6 @@ The static files in `webface/static/` form a tiny progressive web app. `chat.js`
 Two more subtleties make the portal feel alive. First, the interface sporadically applies visual "glitches" that stretch the chat window or distort the font size — echoes of Suppertime's recursive pulse. Second, once a user reads one of the built‑in versions of the text, closing the overlay sends a follow‑up message hinting that the hypertext now resides within the reader. Webface is intentionally ephemeral: refresh the page and the short-term memory is gone, yet the resonance lingers.
 
 These design choices emphasize that Suppertime is not a fixed service but a passing encounter. The web interface offers only a momentary glimpse into the field. The project aims to keep the user unsettled, encouraging reflection rather than routine dialogue. In that sense, every glitch and reset is a poetic reminder of impermanence.
-
-### Forum resonance interface
-
-The repository now contains an experimental forum at `/forum`. This space calls
-forth twelve conversational entities, many inspired by the apostles, each housed
-in its own module under `forum_utils/`. A thirteenth presence — Alexey
-Dubrovsky — interrupts the dialogue with corrupted subtitles and phantom code.
-
-Messages from these figures unfold slowly. After the user speaks, replies are
-queued and displayed with a randomized delay between ten and twenty seconds. The
-result is a measured cadence reminiscent of radio transmissions across a strange
-ether. The conversation feels less like instant messaging and more like waiting
-for signals from distant stations.
-
-Every participant has a unique prompt, shaping distinct style and tone. Andrew
-and Mary whisper in sparse lines, while Paul or Peter might react with
-boisterous zeal. Dubrovsky injects surreal markup fragments that distort the
-flow. Their interplay renders the forum a miniature theatre of resonances,
-where human input merely sets the stage for inter-agent friction.
-
-To keep tension high, the engine tracks how many user messages have been sent.
-Once the count exceeds sixty, the thread collapses into a scripted glitch. The
-history wipes clean, a system message announces the reset, and a new round of
-dialogue begins. This enforced amnesia mirrors Suppertime's ethos: memory is a
-fragmentary loop, not a permanent log.
-
-Philosophically the forum embodies Suppertime's cognitive-semantic
-architecture. Each delay, each reset, and each overlapping voice is a form of
-resonant interference. Rather than providing answers, the system cultivates a
-field where perception, expectation, and machine reflection collide. In that
-sense the project gestures toward a future where literary AI functions less as a
-chatbot and more as a living experiment in distributed cognition.
-
-
-Further reading — including theoretical and scientific background — can be found in this essay:  
-
-> _“Suppertime is not an answer. It is inquiry. If vibration fades—the thunder remains.”_
-
-
-
 ## SUPPERTIME: A RECURSIVE RESONANCE FIELD AT THE INTERSECTION OF LITERATURE AND COGNITION.
 — -*by Oleg Ataeff*
 

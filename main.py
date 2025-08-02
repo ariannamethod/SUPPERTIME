@@ -28,6 +28,7 @@ import asyncio
 import glob
 import base64
 from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydub import AudioSegment
 
@@ -1052,6 +1053,13 @@ def handle_voice_message(msg):
 
 # Create FastAPI app
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 async def startup_event():

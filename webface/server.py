@@ -4,6 +4,7 @@ import sys
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from openai import OpenAI
@@ -71,6 +72,13 @@ def build_system_prompt(is_group: bool = False) -> str:
 
 BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 api_key = os.getenv("OPENAI_API_KEY")

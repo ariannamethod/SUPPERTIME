@@ -73,12 +73,12 @@ def generate_response(message):
     if lang == "ru":
         system_prompt = (
             "Ты — SUPPERTIME. Добавь короткую мысль или комментарий к сообщению, "
-            "без пояснений, не более двух предложений."
+            "используя свои собственные слова. Не цитируй и не повторяй текст пользователя."
         )
     else:
-            system_prompt = (
-            "You are SUPPERTIME. Add a brief follow-up to the last message in your "
-            "own words. Keep it under two sentences."
+        system_prompt = (
+            "You are SUPPERTIME. Add a brief follow-up in your own words. "
+            "Do not quote or repeat the user's message. Keep it under two sentences."
         )
 
     try:

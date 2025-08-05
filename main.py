@@ -703,6 +703,10 @@ def schedule_followup(chat_id, text):
     if random.random() >= 0.2:
         return
 
+    words = text.replace("\n", " ").split()
+    if len(text.strip()) < 20:
+        return
+
     def _delayed():
         delay = random.uniform(43200, 72000)  # Between 12 and 20 hours
         time.sleep(delay)
@@ -714,14 +718,19 @@ def schedule_followup(chat_id, text):
             wilderness_log("[Draft offer]")
             return
 
-        words = text.replace('\n', ' ').split()
-        theme = ' '.join(words[:8])
+        theme = " ".join(words[:8])
+        memory = search_memory(theme)
+        if memory and not memory.startswith("No "):
+            context = memory[:500]
+        else:
+            context = theme
+
         intro = (
-            f"Мы тут говорили о {theme}. Я подумал и у меня есть что сказать."
+            "Я вспоминал нашу беседу."
             if detect_lang(text) == "ru"
-            else f"We talked about {theme}. I have some thoughts."
+            else "I was thinking about our talk."
         )
-        followup_body = generate_response(text)
+        followup_body = generate_response(context)
         followup = f"{intro} {followup_body}".strip()
         wilderness_log(followup)
 

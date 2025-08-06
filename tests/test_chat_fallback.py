@@ -31,6 +31,7 @@ class DummyClient:
 
 def test_fallback_without_api_key():
     server.openai_client = None
+    server.memory.openai_client = None
     client = TestClient(server.app)
     resp = client.post("/chat", json={"message": "test message"})
     data = resp.json()
@@ -40,6 +41,7 @@ def test_fallback_without_api_key():
 
 def test_with_openai_client_stub():
     server.openai_client = DummyClient()
+    server.memory.openai_client = server.openai_client
     client = TestClient(server.app)
     resp = client.post("/chat", json={"message": "whatever"})
     data = resp.json()

@@ -116,6 +116,12 @@ def _get_history(session_id: str):
     return session
 
 
+def _session_response(data: Dict[str, Any], session_id: str) -> JSONResponse:
+    response = JSONResponse({**data, "session_id": session_id})
+    response.set_cookie("session_id", session_id)
+    return response
+
+
 def _summarize_session(session):
     if len(session["messages"]) <= HISTORY_SUMMARY_TRIGGER:
         return
@@ -182,7 +188,7 @@ async def chat(request: Request):
     session = _get_history(session_id)
     history = session["messages"]
     if not text:
-        return {"reply": "", "session_id": session_id}
+        return _session_response({"reply": ""}, session_id)
 
     global MESSAGE_COUNT, EXPECTING_VERSION, ASKED_DIFF, LAST_VERSION
     MESSAGE_COUNT += 1
@@ -217,7 +223,7 @@ async def chat(request: Request):
             reply = f"{intro}\n{logic}"
             history.append({"role": "assistant", "content": reply})
             _summarize_session(session)
-            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.4.html", "version": "1.4", "session_id": session_id})
+            return _session_response({"reply": reply, "page": "/static/suppertime_v1.4.html", "version": "1.4"}, session_id)
         if "1.6" in lower:
             EXPECTING_VERSION = False
             ASKED_DIFF = False
@@ -227,13 +233,13 @@ async def chat(request: Request):
             reply = f"{intro}\n{logic}"
             history.append({"role": "assistant", "content": reply})
             _summarize_session(session)
-            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6", "session_id": session_id})
+            return _session_response({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6"}, session_id)
         if ("разниц" in lower or "difference" in lower or "чем" in lower) and not ASKED_DIFF:
             ASKED_DIFF = True
             reply = "Ты начнешь понимать разницу по мере чтения. Какую версию выбираешь – 1.4 или 1.6?"
             history.append({"role": "assistant", "content": reply})
             _summarize_session(session)
-            return JSONResponse({"reply": reply, "session_id": session_id})
+            return _session_response({"reply": reply}, session_id)
         if ("разниц" in lower or "difference" in lower) and ASKED_DIFF:
             EXPECTING_VERSION = False
             ASKED_DIFF = False
@@ -241,12 +247,12 @@ async def chat(request: Request):
             reply = "Не будем спорить. Открываю версию 1.6."
             history.append({"role": "assistant", "content": reply})
             _summarize_session(session)
-            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6", "session_id": session_id})
+            return _session_response({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6"}, session_id)
         else:
             reply = "Выбери версию 1.4 или 1.6."
             history.append({"role": "assistant", "content": reply})
             _summarize_session(session)
-            return JSONResponse({"reply": reply, "session_id": session_id})
+            return _session_response({"reply": reply}, session_id)
 
     if any(word in lower for word in ["suppertime", "саппертайм", "рассказ", "прочитать"]):
         EXPECTING_VERSION = True
@@ -254,11 +260,11 @@ async def chat(request: Request):
         reply = "Какую версию Suppertime хочешь прочитать – 1.4 или 1.6?"
         history.append({"role": "assistant", "content": reply})
         _summarize_session(session)
-        return JSONResponse({"reply": reply, "session_id": session_id})
+        return _session_response({"reply": reply}, session_id)
 
     history.append({"role": "assistant", "content": reply})
     _summarize_session(session)
-    return JSONResponse({"reply": reply, "session_id": session_id})
+    return _session_response({"reply": reply}, session_id)
 
 
 @app.post("/chat/clear")
@@ -270,15 +276,21 @@ async def chat_clear(request: Request):
 
 
 @app.get("/after_read")
-async def after_read(version: str = ""):
+async def after_read(request: Request, version: str = ""):
     global LAST_VERSION
+    session_id = request.cookies.get("session_id") or request.query_params.get("session_id")
+    if not session_id:
+        session_id = str(uuid.uuid4())
     if version:
         LAST_VERSION = version
     message = (
         "А — мы поделились текстом, Б — ты его прочитал, В — теперь он живёт в тебе = парадокс: версия меняется вместе с читателем. "
         "Ну как тебе? Хочешь ещё одну версию? Что зацепило больше всего?"
     )
-    return JSONResponse({"reply": message})
+    session = _get_history(session_id)
+    session["messages"].append({"role": "assistant", "content": message})
+    _summarize_session(session)
+    return _session_response({"reply": message}, session_id)
 
 
 @app.get("/forum/start")

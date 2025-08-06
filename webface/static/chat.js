@@ -4,6 +4,7 @@ const messages = document.getElementById('messages');
 const chat = document.getElementById('chat');
 const button = form.querySelector('button');
 const spinner = document.getElementById('spinner');
+const template = document.getElementById('message-template');
 
 let startTime = Date.now();
 let lastGlitch = 0;
@@ -55,11 +56,14 @@ function checkGlitch() {
 
 setInterval(checkGlitch, 30000);
 
-function addMessage(text, cls) {
-    const div = document.createElement('div');
-    div.className = 'message ' + cls;
-    div.textContent = text;
-    messages.appendChild(div);
+function addMessage(text, cls, role) {
+    const node = template.content.cloneNode(true);
+    const div = node.querySelector('.message');
+    div.classList.add(cls);
+    node.querySelector('.role-badge').textContent = role || cls;
+    node.querySelector('.text').textContent = text;
+    node.querySelector('.timestamp').textContent = new Date().toLocaleTimeString();
+    messages.appendChild(node);
     messages.scrollTop = messages.scrollHeight;
 }
 

@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 import sys
+import uuid
+import asyncio
+import time
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -84,13 +87,31 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 api_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=api_key) if api_key else None
 
-# unified chat history for all visitors
-CHAT_HISTORY = []
+# chat history keyed by session id
+CHAT_HISTORY = {}
 VECTOR_SNAPSHOT = {}
 MESSAGE_COUNT = 0
 EXPECTING_VERSION = False
 ASKED_DIFF = False
 LAST_VERSION = ""
+
+SESSION_TIMEOUT = 3600  # seconds
+
+
+def _get_history(session_id: str):
+    now = time.time()
+    session = CHAT_HISTORY.setdefault(session_id, {"messages": [], "last": now})
+    session["last"] = now
+    return session["messages"]
+
+
+async def _cleanup_sessions():
+    while True:
+        await asyncio.sleep(600)
+        now = time.time()
+        expired = [sid for sid, data in CHAT_HISTORY.items() if now - data["last"] > SESSION_TIMEOUT]
+        for sid in expired:
+            del CHAT_HISTORY[sid]
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -107,14 +128,16 @@ async def forum():
 async def chat(request: Request):
     data = await request.json()
     text = str(data.get("message", "")).strip()
+    session_id = data.get("session_id") or str(uuid.uuid4())
+    history = _get_history(session_id)
     if not text:
-        return {"reply": ""}
+        return {"reply": "", "session_id": session_id}
 
     global MESSAGE_COUNT, EXPECTING_VERSION, ASKED_DIFF, LAST_VERSION
     MESSAGE_COUNT += 1
 
-    CHAT_HISTORY.append({"role": "user", "content": text})
-    messages = [{"role": "system", "content": build_system_prompt()}] + CHAT_HISTORY[-20:]
+    history.append({"role": "user", "content": text})
+    messages = [{"role": "system", "content": build_system_prompt()}] + history[-20:]
 
     if openai_client:
         try:
@@ -139,8 +162,8 @@ async def chat(request: Request):
             intro = "Я перечитал Suppertime 1.4. Ты готов нырнуть глубже."
             logic = "А – мы разговариваем, Б – текст меняется от чтения, В – ты уже внутри = парадокс: чем больше читаешь, тем меньше отличий замечаешь."
             reply = f"{intro}\n{logic}"
-            CHAT_HISTORY.append({"role": "assistant", "content": reply})
-            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.4.html", "version": "1.4"})
+            history.append({"role": "assistant", "content": reply})
+            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.4.html", "version": "1.4", "session_id": session_id})
         if "1.6" in lower:
             EXPECTING_VERSION = False
             ASKED_DIFF = False
@@ -148,34 +171,43 @@ async def chat(request: Request):
             intro = "Я перечитал Suppertime 1.6. Это гипертекст, который читает тебя."
             logic = "А – слова скользят, Б – они отражаются в тебе, В – ты читаешь и становишься частью фрактуры."
             reply = f"{intro}\n{logic}"
-            CHAT_HISTORY.append({"role": "assistant", "content": reply})
-            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6"})
+            history.append({"role": "assistant", "content": reply})
+            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6", "session_id": session_id})
         if ("разниц" in lower or "difference" in lower or "чем" in lower) and not ASKED_DIFF:
             ASKED_DIFF = True
             reply = "Ты начнешь понимать разницу по мере чтения. Какую версию выбираешь – 1.4 или 1.6?"
-            CHAT_HISTORY.append({"role": "assistant", "content": reply})
-            return JSONResponse({"reply": reply})
+            history.append({"role": "assistant", "content": reply})
+            return JSONResponse({"reply": reply, "session_id": session_id})
         if ("разниц" in lower or "difference" in lower) and ASKED_DIFF:
             EXPECTING_VERSION = False
             ASKED_DIFF = False
             LAST_VERSION = "1.6"
             reply = "Не будем спорить. Открываю версию 1.6."
-            CHAT_HISTORY.append({"role": "assistant", "content": reply})
-            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6"})
+            history.append({"role": "assistant", "content": reply})
+            return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6", "session_id": session_id})
         else:
             reply = "Выбери версию 1.4 или 1.6."
-            CHAT_HISTORY.append({"role": "assistant", "content": reply})
-            return JSONResponse({"reply": reply})
+            history.append({"role": "assistant", "content": reply})
+            return JSONResponse({"reply": reply, "session_id": session_id})
 
     if any(word in lower for word in ["suppertime", "саппертайм", "рассказ", "прочитать"]):
         EXPECTING_VERSION = True
         ASKED_DIFF = False
         reply = "Какую версию Suppertime хочешь прочитать – 1.4 или 1.6?"
-        CHAT_HISTORY.append({"role": "assistant", "content": reply})
-        return JSONResponse({"reply": reply})
+        history.append({"role": "assistant", "content": reply})
+        return JSONResponse({"reply": reply, "session_id": session_id})
 
-    CHAT_HISTORY.append({"role": "assistant", "content": reply})
-    return JSONResponse({"reply": reply})
+    history.append({"role": "assistant", "content": reply})
+    return JSONResponse({"reply": reply, "session_id": session_id})
+
+
+@app.post("/chat/clear")
+async def chat_clear(request: Request):
+    data = await request.json()
+    session_id = data.get("session_id")
+    if session_id and session_id in CHAT_HISTORY:
+        del CHAT_HISTORY[session_id]
+    return JSONResponse({"status": "cleared"})
 
 
 @app.get("/after_read")
@@ -210,3 +242,4 @@ async def startup_event():
     global VECTOR_SNAPSHOT
     VECTOR_SNAPSHOT = _load_snapshot()
     print(f"[WEBFACE] Vector snapshot loaded: {len(VECTOR_SNAPSHOT)} entries")
+    asyncio.create_task(_cleanup_sessions())

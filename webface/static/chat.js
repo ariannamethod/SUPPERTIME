@@ -6,6 +6,12 @@ const chat = document.getElementById('chat');
 let startTime = Date.now();
 let lastGlitch = 0;
 
+let sessionId = localStorage.getItem('session_id');
+if (!sessionId) {
+    sessionId = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    localStorage.setItem('session_id', sessionId);
+}
+
 const stretchLines = [
     'ой нет! опять! :-)',
     'оу, размер поплыл!',
@@ -88,9 +94,13 @@ form.addEventListener('submit', async (e) => {
     const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
+        body: JSON.stringify({ message: text, session_id: sessionId })
     });
     const data = await res.json();
+    if (data.session_id && data.session_id !== sessionId) {
+        sessionId = data.session_id;
+        localStorage.setItem('session_id', sessionId);
+    }
     addMessage(data.reply, 'assistant');
     if (data.page) {
         showPage(data.page, data.version || '');
@@ -99,3 +109,14 @@ form.addEventListener('submit', async (e) => {
         addMessage('Это чат поглощает пространство-время, ты становишься чатом, а чат — тобой.', 'assistant');
     }
 });
+
+async function clearHistory() {
+    await fetch('/chat/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId })
+    });
+    messages.innerHTML = '';
+}
+
+window.clearChatHistory = clearHistory;

@@ -2,6 +2,8 @@ const form = document.getElementById('chat-form');
 const input = document.getElementById('chat-input');
 const messages = document.getElementById('messages');
 const chat = document.getElementById('chat');
+const button = form.querySelector('button');
+const spinner = document.getElementById('spinner');
 
 let startTime = Date.now();
 let lastGlitch = 0;
@@ -91,22 +93,35 @@ form.addEventListener('submit', async (e) => {
     if (!text) return;
     addMessage(text, 'user');
     input.value = '';
-    const res = await fetch('/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, session_id: sessionId })
-    });
-    const data = await res.json();
-    if (data.session_id && data.session_id !== sessionId) {
-        sessionId = data.session_id;
-        localStorage.setItem('session_id', sessionId);
-    }
-    addMessage(data.reply, 'assistant');
-    if (data.page) {
-        showPage(data.page, data.version || '');
-    }
-    if (/что происходит|что это|что случилось/i.test(text) && Date.now() - lastGlitch < 10000) {
-        addMessage('Это чат поглощает пространство-время, ты становишься чатом, а чат — тобой.', 'assistant');
+    button.disabled = true;
+    spinner.classList.remove('hidden');
+    try {
+        const res = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, session_id: sessionId })
+        });
+        if (!res.ok) {
+            throw new Error(res.statusText || 'Network error');
+        }
+        const data = await res.json();
+        if (data.session_id && data.session_id !== sessionId) {
+            sessionId = data.session_id;
+            localStorage.setItem('session_id', sessionId);
+        }
+        addMessage(data.reply, 'assistant');
+        if (data.page) {
+            showPage(data.page, data.version || '');
+        }
+        if (/что происходит|что это|что случилось/i.test(text) && Date.now() - lastGlitch < 10000) {
+            addMessage('Это чат поглощает пространство-время, ты становишься чатом, а чат — тобой.', 'assistant');
+        }
+    } catch (err) {
+        addMessage('Ошибка: ' + err.message, 'assistant');
+    } finally {
+        button.disabled = false;
+        spinner.classList.add('hidden');
+        input.focus();
     }
 });
 

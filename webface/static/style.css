@@ -58,11 +58,37 @@ button {
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
+
 .message {
     margin: 10px 0;
 }
+
 .message.user {
     text-align: right;
+    background: #dcf8c6;
+    border: 1px solid #b2d8a3;
+    border-radius: 12px 12px 0 12px;
+    display: inline-block;
+    padding: 6px 10px;
+}
+
+.message.assistant {
+    background: #f1f1f1;
+    border: 1px solid #ccc;
+    border-radius: 12px 12px 12px 0;
+    display: inline-block;
+    padding: 6px 10px;
+}
+
+.message.long {
+    font-size: 0.9em;
+}
+
+.message .timestamp {
+    display: block;
+    font-size: 0.75em;
+    color: #666;
+    margin-top: 2px;
 }
 
 .message[class*='agent-'] {

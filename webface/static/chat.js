@@ -58,7 +58,14 @@ setInterval(checkGlitch, 30000);
 function addMessage(text, cls) {
     const div = document.createElement('div');
     div.className = 'message ' + cls;
+    if (text.length > 120) {
+        div.classList.add('long');
+    }
     div.textContent = text;
+    const time = document.createElement('span');
+    time.className = 'timestamp';
+    time.textContent = new Date().toLocaleTimeString();
+    div.appendChild(time);
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
 }

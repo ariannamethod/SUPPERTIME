@@ -9,6 +9,9 @@ function agentClass(name) {
 function addMessage(text, cls, name) {
     const div = document.createElement('div');
     div.className = 'message ' + cls;
+    if (text.length > 120) {
+        div.classList.add('long');
+    }
     if (name) {
         const avatar = document.createElement('span');
         avatar.className = 'avatar';
@@ -24,6 +27,10 @@ function addMessage(text, cls, name) {
     } else {
         div.textContent = text;
     }
+    const time = document.createElement('span');
+    time.className = 'timestamp';
+    time.textContent = new Date().toLocaleTimeString();
+    div.appendChild(time);
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
 }
@@ -32,7 +39,7 @@ function queueMessages(list) {
     let delay = 0;
     list.forEach(m => {
         delay += 10000 + Math.random() * 10000;
-        setTimeout(() => addMessage(m.text, agentClass(m.name), m.name), delay);
+        setTimeout(() => addMessage(m.text, 'assistant ' + agentClass(m.name), m.name), delay);
     });
 }
 

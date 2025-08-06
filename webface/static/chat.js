@@ -80,9 +80,15 @@ function hidePage() {
     overlay.classList.add('hidden');
     const version = overlay.dataset.version;
     overlay.dataset.version = '';
-    fetch('/after_read?version=' + (version || ''))
+    fetch('/after_read?version=' + (version || '') + '&session_id=' + encodeURIComponent(sessionId))
         .then(r => r.json())
-        .then(d => addMessage(d.reply, 'assistant'));
+        .then(d => {
+            if (d.session_id && d.session_id !== sessionId) {
+                sessionId = d.session_id;
+                localStorage.setItem('session_id', sessionId);
+            }
+            addMessage(d.reply, 'assistant');
+        });
 }
 
 window.addEventListener('message', (e) => {

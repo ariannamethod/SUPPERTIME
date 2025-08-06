@@ -4,6 +4,8 @@
     --text-color: #000000;
     --primary-color: #000000;
     --secondary-color: #ffffff;
+    --assistant-bg: #f3f3f3;
+    --user-bg: #d1e7dd;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -12,7 +14,18 @@
         --text-color: #ffffff;
         --primary-color: #ffffff;
         --secondary-color: #000000;
+        --assistant-bg: #333333;
+        --user-bg: #264d26;
     }
+}
+
+body.dark {
+    --bg-color: #000000;
+    --text-color: #ffffff;
+    --primary-color: #ffffff;
+    --secondary-color: #000000;
+    --assistant-bg: #333333;
+    --user-bg: #264d26;
 }
 
 body {
@@ -77,14 +90,13 @@ button {
     border-radius: 6px;
 }
 
-.role-badge {
-    display: inline-block;
-    padding: 2px 6px;
-    background: var(--primary-color);
-    color: var(--secondary-color);
+#theme-toggle {
+    background: none;
+    color: var(--text-color);
+    border: 1px solid var(--text-color);
+    margin-left: 1rem;
+    padding: 6px 10px;
     border-radius: 4px;
-    font-size: 0.75rem;
-    margin-right: 6px;
 }
 
 .timestamp {
@@ -106,18 +118,34 @@ button {
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
+
 .message {
     margin: 10px 0;
+    padding: 8px;
+    border-radius: 6px;
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    max-width: 80%;
 }
+
 .message.user {
+    margin-left: auto;
+    background: var(--user-bg);
+    border-radius: 12px 12px 0 12px;
     text-align: right;
 }
 
+.message.assistant {
+    margin-right: auto;
+    background: var(--assistant-bg);
+    border-radius: 12px 12px 12px 0;
+}
+
 .message[class*='agent-'] {
-    display: flex;
-    align-items: center;
+    margin-right: auto;
+    border-radius: 12px 12px 12px 0;
     padding: 4px 8px;
-    border-radius: 6px;
 }
 
 .message .avatar {
@@ -131,6 +159,15 @@ button {
     font-size: 12px;
     color: #fff;
     flex-shrink: 0;
+}
+
+.message.user .avatar {
+    display: none;
+}
+
+.message.assistant .avatar {
+    background: var(--primary-color);
+    color: var(--secondary-color);
 }
 
 .message .name {
@@ -209,6 +246,12 @@ button {
 }
 
 @media (max-width: 600px) {
+    nav {
+        flex-direction: column;
+    }
+    #messages {
+        padding: 0 10px;
+    }
     #chat-form {
         flex-direction: column;
     }

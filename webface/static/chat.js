@@ -5,6 +5,7 @@ const chat = document.getElementById('chat');
 const button = form.querySelector('button');
 const spinner = document.getElementById('spinner');
 const template = document.getElementById('message-template');
+const themeToggle = document.getElementById('theme-toggle');
 
 let startTime = Date.now();
 let lastGlitch = 0;
@@ -14,6 +15,16 @@ if (!sessionId) {
     sessionId = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
     localStorage.setItem('session_id', sessionId);
 }
+
+const savedTheme = localStorage.getItem('theme');
+if (savedTheme === 'dark') {
+    document.body.classList.add('dark');
+}
+
+themeToggle.addEventListener('click', () => {
+    document.body.classList.toggle('dark');
+    localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+});
 
 const stretchLines = [
     'ой нет! опять! :-)',
@@ -60,7 +71,10 @@ function addMessage(text, cls, role) {
     const node = template.content.cloneNode(true);
     const div = node.querySelector('.message');
     div.classList.add(cls);
-    node.querySelector('.role-badge').textContent = role || cls;
+    div.classList.add(cls === 'user' ? 'user' : 'assistant');
+    const name = role || (cls === 'user' ? 'You' : 'Assistant');
+    node.querySelector('.name').textContent = name;
+    node.querySelector('.avatar').textContent = name[0].toUpperCase();
     node.querySelector('.text').textContent = text;
     node.querySelector('.timestamp').textContent = new Date().toLocaleTimeString();
     messages.appendChild(node);

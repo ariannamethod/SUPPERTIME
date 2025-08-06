@@ -12,6 +12,7 @@
         <nav>
             <a href="/static/index.html">Chat</a>
             <a href="/static/forum.html">Forum</a>
+            <button id="theme-toggle" type="button">🌓</button>
         </nav>
     </header>
     <main id="chat">
@@ -24,7 +25,8 @@
     <aside id="info"></aside>
     <template id="message-template">
         <div class="message">
-            <span class="role-badge"></span>
+            <span class="avatar"></span>
+            <span class="name"></span>
             <span class="text"></span>
             <span class="timestamp"></span>
         </div>

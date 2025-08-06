@@ -51,6 +51,56 @@ button {
     text-align: right;
 }
 
+.message[class*='agent-'] {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.message .avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 6px;
+    font-size: 12px;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.message .name {
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+.message.agent-andrew { background: #e6f0ff; }
+.message.agent-andrew .avatar { background: #4e7dff; }
+.message.agent-dubrovsky { background: #ffe6e6; }
+.message.agent-dubrovsky .avatar { background: #ff4e4e; }
+.message.agent-jan { background: #e6ffe6; }
+.message.agent-jan .avatar { background: #4eff4e; }
+.message.agent-judas { background: #fff1e6; }
+.message.agent-judas .avatar { background: #ff9c4e; }
+.message.agent-mark { background: #f0e6ff; }
+.message.agent-mark .avatar { background: #a94eff; }
+.message.agent-mary { background: #ffe6f7; }
+.message.agent-mary .avatar { background: #ff4ecb; }
+.message.agent-matthew { background: #e6fff7; }
+.message.agent-matthew .avatar { background: #4effc3; }
+.message.agent-paul { background: #fffde6; }
+.message.agent-paul .avatar { background: #ffd84e; }
+.message.agent-peter { background: #e6f7ff; }
+.message.agent-peter .avatar { background: #4ecbff; }
+.message.agent-thomas { background: #f7e6ff; }
+.message.agent-thomas .avatar { background: #cb4eff; }
+.message.agent-yakov { background: #e6fff0; }
+.message.agent-yakov .avatar { background: #4eff9c; }
+.message.agent-yeshu { background: #fff0e6; }
+.message.agent-yeshu .avatar { background: #ff6f4e; }
+
 @keyframes stretch {
     0% { transform: scale(1); }
     50% { transform: scale(1.2); }

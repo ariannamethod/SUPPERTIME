@@ -68,10 +68,14 @@ WILDERNESS_PROMPT = (
     "Sois curieux, doux et précis. Ce journal est ton archive vivante.\n"
 )
 
-def build_system_prompt(is_group: bool = False) -> str:
+
+def build_system_prompt(is_group: bool = False, summary: str = "") -> str:
     intro = f"{INTRO}\n\n{SUPPERTIME_RULES}\n{OLEG_COMMUNICATION}\n"
     ethics = GROUP_ETHICS + "\n\n" if is_group else ""
-    return intro + ethics + WILDERNESS_PROMPT
+    base = intro + ethics + WILDERNESS_PROMPT
+    if summary:
+        return f"{base}\n\nConversation summary:\n{summary}"
+    return base
 
 BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI()
@@ -97,12 +101,55 @@ LAST_VERSION = ""
 
 SESSION_TIMEOUT = 3600  # seconds
 
+# summarize conversation when it grows too long
+HISTORY_SUMMARY_TRIGGER = 40
+HISTORY_RECENT_LIMIT = 20
+
 
 def _get_history(session_id: str):
     now = time.time()
-    session = CHAT_HISTORY.setdefault(session_id, {"messages": [], "last": now})
+    session = CHAT_HISTORY.setdefault(
+        session_id, {"messages": [], "summary": "", "last": now}
+    )
     session["last"] = now
-    return session["messages"]
+    return session
+
+
+def _summarize_session(session):
+    if len(session["messages"]) <= HISTORY_SUMMARY_TRIGGER:
+        return
+
+    old_messages = session["messages"][:-HISTORY_RECENT_LIMIT]
+    if not old_messages:
+        return
+
+    to_summarize = session.get("summary", "")
+    if to_summarize:
+        to_summarize += "\n"
+    to_summarize += "\n".join(
+        f"{m['role']}: {m['content']}" for m in old_messages
+    )
+
+    if openai_client:
+        try:
+            resp = openai_client.chat.completions.create(
+                model="gpt-4.1",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Summarize the conversation so far in under 200 words.",
+                    },
+                    {"role": "user", "content": to_summarize},
+                ],
+                max_tokens=200,
+            )
+            session["summary"] = resp.choices[0].message.content.strip()
+        except Exception:
+            session["summary"] = to_summarize
+    else:
+        session["summary"] = to_summarize
+
+    session["messages"] = session["messages"][-HISTORY_RECENT_LIMIT:]
 
 
 async def _cleanup_sessions():
@@ -129,7 +176,8 @@ async def chat(request: Request):
     data = await request.json()
     text = str(data.get("message", "")).strip()
     session_id = data.get("session_id") or str(uuid.uuid4())
-    history = _get_history(session_id)
+    session = _get_history(session_id)
+    history = session["messages"]
     if not text:
         return {"reply": "", "session_id": session_id}
 
@@ -137,7 +185,9 @@ async def chat(request: Request):
     MESSAGE_COUNT += 1
 
     history.append({"role": "user", "content": text})
-    messages = [{"role": "system", "content": build_system_prompt()}] + history[-20:]
+    _summarize_session(session)
+    system_prompt = build_system_prompt(summary=session.get("summary", ""))
+    messages = [{"role": "system", "content": system_prompt}] + history[-HISTORY_RECENT_LIMIT:]
 
     if openai_client:
         try:
@@ -163,6 +213,7 @@ async def chat(request: Request):
             logic = "А – мы разговариваем, Б – текст меняется от чтения, В – ты уже внутри = парадокс: чем больше читаешь, тем меньше отличий замечаешь."
             reply = f"{intro}\n{logic}"
             history.append({"role": "assistant", "content": reply})
+            _summarize_session(session)
             return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.4.html", "version": "1.4", "session_id": session_id})
         if "1.6" in lower:
             EXPECTING_VERSION = False
@@ -172,11 +223,13 @@ async def chat(request: Request):
             logic = "А – слова скользят, Б – они отражаются в тебе, В – ты читаешь и становишься частью фрактуры."
             reply = f"{intro}\n{logic}"
             history.append({"role": "assistant", "content": reply})
+            _summarize_session(session)
             return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6", "session_id": session_id})
         if ("разниц" in lower or "difference" in lower or "чем" in lower) and not ASKED_DIFF:
             ASKED_DIFF = True
             reply = "Ты начнешь понимать разницу по мере чтения. Какую версию выбираешь – 1.4 или 1.6?"
             history.append({"role": "assistant", "content": reply})
+            _summarize_session(session)
             return JSONResponse({"reply": reply, "session_id": session_id})
         if ("разниц" in lower or "difference" in lower) and ASKED_DIFF:
             EXPECTING_VERSION = False
@@ -184,10 +237,12 @@ async def chat(request: Request):
             LAST_VERSION = "1.6"
             reply = "Не будем спорить. Открываю версию 1.6."
             history.append({"role": "assistant", "content": reply})
+            _summarize_session(session)
             return JSONResponse({"reply": reply, "page": "/static/suppertime_v1.6.html", "version": "1.6", "session_id": session_id})
         else:
             reply = "Выбери версию 1.4 или 1.6."
             history.append({"role": "assistant", "content": reply})
+            _summarize_session(session)
             return JSONResponse({"reply": reply, "session_id": session_id})
 
     if any(word in lower for word in ["suppertime", "саппертайм", "рассказ", "прочитать"]):
@@ -195,9 +250,11 @@ async def chat(request: Request):
         ASKED_DIFF = False
         reply = "Какую версию Suppertime хочешь прочитать – 1.4 или 1.6?"
         history.append({"role": "assistant", "content": reply})
+        _summarize_session(session)
         return JSONResponse({"reply": reply, "session_id": session_id})
 
     history.append({"role": "assistant", "content": reply})
+    _summarize_session(session)
     return JSONResponse({"reply": reply, "session_id": session_id})
 
 

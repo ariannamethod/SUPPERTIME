@@ -15,6 +15,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from openai import OpenAI
 from utils.config import _load_snapshot
 from forum_engine import start_forum, user_message
+from utils.memory import ConversationMemory, get_recent_summaries
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 api_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=api_key) if api_key else None
+memory = ConversationMemory(openai_client=openai_client)
 
 # chat history keyed by session id
 CHAT_HISTORY: Dict[str, Dict[str, Any]] = {}
@@ -211,9 +213,14 @@ async def chat(request: Request):
     MESSAGE_COUNT += 1
 
     history.append({"role": "user", "content": text})
+    memory.add_message("user", text)
     _summarize_session(session)
     system_prompt = build_system_prompt(summary=session.get("summary", ""))
-    messages = [{"role": "system", "content": system_prompt}] + history[-HISTORY_RECENT_LIMIT:]
+    memory_summaries = get_recent_summaries()
+    memory_msgs = [{"role": "system", "content": s} for s in memory_summaries]
+    messages = (
+        [{"role": "system", "content": system_prompt}] + memory_msgs + history[-HISTORY_RECENT_LIMIT:]
+    )
 
     if not openai_client:
         logger.warning("OpenAI client not configured; using fallback response")
@@ -282,6 +289,7 @@ async def chat(request: Request):
         return _session_response({"reply": reply}, session_id)
 
     history.append({"role": "assistant", "content": reply})
+    memory.add_message("assistant", reply)
     _summarize_session(session)
     return _session_response({"reply": reply}, session_id)
 

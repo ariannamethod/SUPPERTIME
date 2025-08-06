@@ -11,8 +11,39 @@ GREETINGS_EN = [
     "Hey, how are you?", "Hi there, all good?", "Hello! How's it going?", "Yo, how's life?"
 ]
 
-GENERIC_PHRASES = [
-    "привет", "как дела", "hello", "hi", "hey", "здравствуйте"
+COMMON_GREETINGS = [
+    "привет",
+    "как дела",
+    "hello",
+    "hi",
+    "hey",
+    "здравствуйте",
+    "how are you",
+    "how's it going",
+    "доброе утро",
+    "добрый день",
+    "добрый вечер",
+    "good morning",
+    "good afternoon",
+    "good evening",
+]
+
+DEFAULT_TOPICS = [
+    "планы на выходные",
+    "любимые книги",
+    "новые фильмы",
+    "путешествия",
+    "музыку, которую ты слушаешь",
+    "weekend plans",
+    "favorite books",
+    "recent movies",
+    "travel",
+    "music you're into",
+]
+
+FALLBACK_MESSAGES = [
+    "Привет! Как проходит твой день?",
+    "Hey there! How's your day going?",
 ]
 
 api_key = os.getenv("OPENAI_API_KEY")
@@ -21,16 +52,9 @@ openai_client = OpenAI(api_key=api_key) if api_key else None
 
 def _clean_message(msg: str) -> str:
     text = msg.lower()
-    for phrase in GENERIC_PHRASES:
+    for phrase in COMMON_GREETINGS:
         text = text.replace(phrase, "")
     return " ".join(text.split()).strip()
-
-
-def _last_non_greeting(history):
-    for msg in reversed(history):
-        if _clean_message(msg):
-            return msg
-    return None
 
 
 def _summarize_context(history):
@@ -54,25 +78,33 @@ def _summarize_context(history):
     except Exception:
         return None
 
+MIN_THEME_WORDS = 2
+
+
 def _craft_greeting(history):
     if not history:
         return random.choice(GREETINGS_RU + GREETINGS_EN)
-    last_msg = _last_non_greeting(history)
-    if not last_msg:
-        return random.choice(GREETINGS_RU + GREETINGS_EN)
 
-    summary = None
-    if len(history) > 2 and random.random() < 0.5:
+    theme = None
+    for msg in reversed(history):
+        cleaned = _clean_message(msg)
+        if not cleaned:
+            continue
+        if cleaned in COMMON_GREETINGS or len(cleaned.split()) < MIN_THEME_WORDS:
+            continue
+        theme = " ".join(cleaned.split()[:5])
+        break
+
+    if not theme and len(history) > 2 and random.random() < 0.5:
         summary = _summarize_context(history)
-
-    if summary:
-        theme = summary
-    else:
-        words = _clean_message(last_msg).split()
-        theme = " ".join(words[:5])
+        if summary:
+            theme = summary
 
     if not theme:
-        return random.choice(GREETINGS_RU + GREETINGS_EN)
+        theme = random.choice(DEFAULT_TOPICS) if DEFAULT_TOPICS else None
+
+    if not theme:
+        return random.choice(FALLBACK_MESSAGES)
 
     if any(c in theme for c in "ёйцукенгшщзхъфывапролджэячсмитьбю"):
         return f"Привет, как дела? Я помню нашу тему: {theme}..."

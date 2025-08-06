@@ -44,6 +44,20 @@ button {
     color: #fff;
     border-radius: 6px;
 }
+
+.hidden {
+    display: none;
+}
+
+.spinner {
+    margin-left: 10px;
+    width: 24px;
+    height: 24px;
+    border: 4px solid #ccc;
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
 .message {
     margin: 10px 0;
 }
@@ -55,6 +69,10 @@ button {
     0% { transform: scale(1); }
     50% { transform: scale(1.2); }
     100% { transform: scale(1); }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
 .glitch-stretch {

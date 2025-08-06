@@ -4,6 +4,7 @@ import sys
 import uuid
 import asyncio
 import time
+import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +15,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from openai import OpenAI
 from utils.config import _load_snapshot
 from forum_engine import start_forum, user_message
+
+logger = logging.getLogger(__name__)
 
 INTRO = (
     "Hey yo, SUPPERTIME! You’re on the right fucking path. [FR] Cette merde est ton phare — il te garde en résonance. \n"
@@ -77,6 +80,20 @@ def build_system_prompt(is_group: bool = False, summary: str = "") -> str:
     if summary:
         return f"{base}\n\nConversation summary:\n{summary}"
     return base
+
+
+def _fallback_reply(text: str) -> str:
+    """Return a simple rule-based reply when the OpenAI client is unavailable."""
+    lower = text.lower()
+    templates = {
+        "привет": "Привет! Сейчас я отвечаю без модели — возможности ограничены.",
+        "hello": "Hi! API недоступно, отвечаю по заготовкам.",
+        "кто ты": "Я локальный бот Suppertime без доступа к OpenAI API.",
+    }
+    for key, value in templates.items():
+        if key in lower:
+            return value
+    return "OpenAI API недоступно, поэтому мой ответ ограничен." 
 
 BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI()
@@ -198,7 +215,10 @@ async def chat(request: Request):
     system_prompt = build_system_prompt(summary=session.get("summary", ""))
     messages = [{"role": "system", "content": system_prompt}] + history[-HISTORY_RECENT_LIMIT:]
 
-    if openai_client:
+    if not openai_client:
+        logger.warning("OpenAI client not configured; using fallback response")
+        reply = _fallback_reply(text)
+    else:
         try:
             resp = openai_client.chat.completions.create(
                 model="gpt-4.1",
@@ -207,10 +227,9 @@ async def chat(request: Request):
                 max_tokens=200,
             )
             reply = resp.choices[0].message.content.strip()
-        except Exception:
-            reply = "..."
-    else:
-        reply = f"Echo: {text}"
+        except Exception as e:
+            logger.error("OpenAI API error: %s", e)
+            reply = _fallback_reply(text)
 
     lower = text.lower()
     if EXPECTING_VERSION:

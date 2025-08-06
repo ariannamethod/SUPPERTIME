@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Dict, Any
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from openai import OpenAI
@@ -92,7 +93,7 @@ api_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=api_key) if api_key else None
 
 # chat history keyed by session id
-CHAT_HISTORY = {}
+CHAT_HISTORY: Dict[str, Dict[str, Any]] = {}
 VECTOR_SNAPSHOT = {}
 MESSAGE_COUNT = 0
 EXPECTING_VERSION = False
@@ -175,7 +176,9 @@ async def forum():
 async def chat(request: Request):
     data = await request.json()
     text = str(data.get("message", "")).strip()
-    session_id = data.get("session_id") or str(uuid.uuid4())
+    session_id = request.cookies.get("session_id") or request.query_params.get("session_id")
+    if not session_id:
+        session_id = str(uuid.uuid4())
     session = _get_history(session_id)
     history = session["messages"]
     if not text:
@@ -260,8 +263,7 @@ async def chat(request: Request):
 
 @app.post("/chat/clear")
 async def chat_clear(request: Request):
-    data = await request.json()
-    session_id = data.get("session_id")
+    session_id = request.query_params.get("session_id") or request.cookies.get("session_id")
     if session_id and session_id in CHAT_HISTORY:
         del CHAT_HISTORY[session_id]
     return JSONResponse({"status": "cleared"})

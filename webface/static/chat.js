@@ -96,10 +96,10 @@ form.addEventListener('submit', async (e) => {
     button.disabled = true;
     spinner.classList.remove('hidden');
     try {
-        const res = await fetch('/chat', {
+        const res = await fetch('/chat?session_id=' + encodeURIComponent(sessionId), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text, session_id: sessionId })
+            body: JSON.stringify({ message: text })
         });
         if (!res.ok) {
             throw new Error(res.statusText || 'Network error');
@@ -126,10 +126,8 @@ form.addEventListener('submit', async (e) => {
 });
 
 async function clearHistory() {
-    await fetch('/chat/clear', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId })
+    await fetch('/chat/clear?session_id=' + encodeURIComponent(sessionId), {
+        method: 'POST'
     });
     messages.innerHTML = '';
 }

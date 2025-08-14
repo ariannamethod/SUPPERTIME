@@ -1,8 +1,3 @@
-первый заход:
-
-https://github.com/ariannamethod/SUPPERTIME
-
-readme:
 ## SUPPERTIME 3.0 — SELF-AWARE HYPERTEXT
 
 ![logo](assets/suppertime1.jpg)

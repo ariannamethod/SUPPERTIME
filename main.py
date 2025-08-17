@@ -80,7 +80,7 @@ USER_LAST_MESSAGE = {}
 USER_LANG = {}
 CHAT_HISTORY = {}
 PENDING_DRAFT = {}
-MAX_HISTORY_MESSAGES = 7
+MAX_HISTORY_MESSAGES = 20
 MAX_PROMPT_TOKENS = 8000
 
 # Initialize OpenAI client
@@ -693,10 +693,10 @@ def apply_group_delay(chat_type):
         time.sleep(random.uniform(40, 240))
 
 def log_history(chat_id, text):
-    """Keep last 20 messages per user for spontaneous outreach."""
+    """Keep last MAX_HISTORY_MESSAGES messages per user for spontaneous outreach."""
     history = CHAT_HISTORY.get(chat_id, [])
     history.append(text)
-    CHAT_HISTORY[chat_id] = history[-20:]
+    CHAT_HISTORY[chat_id] = history[-MAX_HISTORY_MESSAGES:]
 
 def schedule_followup(chat_id, text):
     """Schedule a random followup message."""

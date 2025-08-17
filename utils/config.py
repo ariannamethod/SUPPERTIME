@@ -3,7 +3,6 @@ import glob
 import json
 import hashlib
 import threading
-import time
 
 from utils.whatdotheythinkiam import reflect_on_readme
 
@@ -43,7 +42,10 @@ def _file_hash(path):
 
 def vectorize_lit_files():
     """Vectorize new or updated literary files."""
-    lit_files = glob.glob(os.path.join(LIT_DIR, "*.txt")) + glob.glob(os.path.join(LIT_DIR, "*.md"))
+    lit_files = (
+        glob.glob(os.path.join(LIT_DIR, "*.txt"))
+        + glob.glob(os.path.join(LIT_DIR, "*.md"))
+    )
     if not lit_files:
         return "No literary files found in the lit directory."
 
@@ -81,10 +83,14 @@ def search_lit_files(query):
     results = []
     for file_path in lit_files:
         try:
-            chunks = semantic_search_in_file(file_path, query, os.getenv("OPENAI_API_KEY"), top_k=2)
+            chunks = semantic_search_in_file(
+                file_path, query, os.getenv("OPENAI_API_KEY"), top_k=2
+            )
             if chunks:
                 file_name = os.path.basename(file_path)
-                results.append(f"From {file_name}:\n\n" + "\n\n---\n\n".join(chunks))
+                results.append(
+                    f"From {file_name}:\n\n" + "\n\n---\n\n".join(chunks)
+                )
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Failed to search in {file_path}: {e}")
 
@@ -123,7 +129,7 @@ def _search_logs(query):
                     text = f.read()
                 idx = text.lower().find(query_lower)
                 if idx != -1:
-                    snippet = text[max(0, idx - 50) : idx + 150]
+                    snippet = text[max(0, idx - 50): idx + 150]
                     hits.append(f"[{name}] ...{snippet}...")
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Failed to search in {name}: {e}")
@@ -147,7 +153,10 @@ def search_memory(query):
 
 def explore_lit_directory():
     """Return information about literary files and their status."""
-    lit_files = glob.glob(os.path.join(LIT_DIR, "*.txt")) + glob.glob(os.path.join(LIT_DIR, "*.md"))
+    lit_files = (
+        glob.glob(os.path.join(LIT_DIR, "*.txt"))
+        + glob.glob(os.path.join(LIT_DIR, "*.md"))
+    )
     if not lit_files:
         return "No literary files found in the lit directory."
 
@@ -162,22 +171,46 @@ def explore_lit_directory():
                 preview = "".join(f.readlines()[:3]).strip()
                 if len(preview) > 100:
                     preview = preview[:100] + "..."
-            report.append(f"\n**{file_name}** ({size_kb:.1f} KB) - {status}\nPreview: {preview}")
+            report.append(
+                f"\n**{file_name}** ({size_kb:.1f} KB) - {status}\n"
+                f"Preview: {preview}"
+            )
         except Exception:
             report.append(f"\n**{file_name}** - {status} (Error reading file)")
     return "\n".join(report)
 
 
+# Thread control events
+_lit_check_event = threading.Event()
+_lit_check_thread = None
+
+_identity_reflection_event = threading.Event()
+_identity_reflection_thread = None
+
+
 def schedule_lit_check(interval_hours=72):
     """Periodically check the lit folder for new files."""
+
     def _loop():
         while True:
+            if _lit_check_event.is_set():
+                break
             vectorize_lit_files()
-            time.sleep(interval_hours * 3600)
+            if _lit_check_event.wait(interval_hours * 3600):
+                break
 
-    thread = threading.Thread(target=_loop, daemon=True)
-    thread.start()
-    return thread
+    global _lit_check_thread
+    _lit_check_thread = threading.Thread(target=_loop, daemon=True)
+    _lit_check_thread.start()
+    return _lit_check_thread
+
+
+def stop_lit_check():
+    """Stop the lit folder checking loop."""
+
+    _lit_check_event.set()
+    if _lit_check_thread:
+        _lit_check_thread.join()
 
 
 def schedule_identity_reflection(interval_days=7):
@@ -187,12 +220,24 @@ def schedule_identity_reflection(interval_days=7):
         # initial run
         reflect_on_readme(force=True)
         while True:
-            time.sleep(interval_days * 24 * 3600)
+            if _identity_reflection_event.is_set():
+                break
+            if _identity_reflection_event.wait(interval_days * 24 * 3600):
+                break
             try:
                 reflect_on_readme()
             except Exception as e:
                 print(f"[SUPPERTIME][ERROR] Identity reflection failed: {e}")
 
-    thread = threading.Thread(target=_loop, daemon=True)
-    thread.start()
-    return thread
+    global _identity_reflection_thread
+    _identity_reflection_thread = threading.Thread(target=_loop, daemon=True)
+    _identity_reflection_thread.start()
+    return _identity_reflection_thread
+
+
+def stop_identity_reflection():
+    """Stop the identity reflection loop."""
+
+    _identity_reflection_event.set()
+    if _identity_reflection_thread:
+        _identity_reflection_thread.join()

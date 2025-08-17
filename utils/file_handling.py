@@ -1,5 +1,5 @@
 import os
-import tempfile
+from datetime import datetime
 from pypdf import PdfReader
 import re
 
@@ -9,12 +9,12 @@ def extract_text_from_pdf(path):
     """Extract text from PDF files."""
     try:
         reader = PdfReader(path)
-        text = ""
+        parts = []
         for page in reader.pages:
             page_text = page.extract_text()
             if page_text:
-                text += page_text + "\n\n"
-        text = text.strip()
+                parts.append(page_text)
+        text = "\n\n".join(parts).strip()
         if text:
             # Clean up text - remove excessive newlines and spaces
             text = re.sub(r'\n{3,}', '\n\n', text)
@@ -136,16 +136,15 @@ def extract_text_from_csv(path):
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             reader = csv.reader(f)
             rows = list(reader)
-            
+
             # Format as a table
-            text = ""
-            for row in rows[:100]:  # Limit to first 100 rows
-                text += " | ".join(row) + "\n"
-                
+            lines = [" | ".join(row) for row in rows[:100]]  # Limit to first 100 rows
+
             if len(rows) > 100:
-                text += "\n[Trimmed: only showing first 100 rows]"
-                
-            return text
+                lines.append("")
+                lines.append("[Trimmed: only showing first 100 rows]")
+
+            return "\n".join(lines)
     except Exception as e:
         return f"[CSV reading error ({os.path.basename(path)}): {e}. Try converting to .txt for better resonance.]"
 

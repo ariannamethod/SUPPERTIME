@@ -437,19 +437,31 @@ def download_telegram_file(file_id):
     try:
         # Get the file path
         url = f"{TELEGRAM_API_URL}/getFile"
-        response = requests.get(url, params={"file_id": file_id})
+        response = requests.get(url, params={"file_id": file_id}, timeout=10)
         response.raise_for_status()
         file_path = response.json()["result"]["file_path"]
         
         # Download the file
         url = f"{TELEGRAM_FILE_URL}/{file_path}"
-        response = requests.get(url)
+        response = requests.get(url, stream=True, timeout=10)
         response.raise_for_status()
-        
-        # Save to temporary file
+
+        max_size = 20 * 1024 * 1024  # 20MB limit
+        downloaded = 0
+
+        # Save to temporary file in chunks
         with tempfile.NamedTemporaryFile(delete=False, suffix="." + file_path.split(".")[-1]) as temp_file:
-            temp_file.write(response.content)
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    downloaded += len(chunk)
+                    if downloaded > max_size:
+                        print(f"[SUPPERTIME][ERROR] Telegram file is too large (>20MB)")
+                        return None
+                    temp_file.write(chunk)
             return temp_file.name
+    except requests.exceptions.Timeout:
+        print(f"[SUPPERTIME][ERROR] Telegram file download timed out")
+        return None
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to download Telegram file: {e}")
         return None

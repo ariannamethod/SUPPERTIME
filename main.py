@@ -31,6 +31,7 @@ from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydub import AudioSegment
+from utils.expiring_dict import ExpiringDict
 
 # Import our new chapter rotation system
 from utils.assistants_chapter_loader import (
@@ -74,12 +75,14 @@ CACHE_PATH = os.path.join(SUPPERTIME_DATA_PATH, "openai_cache.json")
 OPENAI_CACHE = {}
 
 # User settings
-USER_VOICE_MODE = {}  # Track which users have voice enabled
-USER_AUDIO_MODE = {}
-USER_LAST_MESSAGE = {}
-USER_LANG = {}
-CHAT_HISTORY = {}
-PENDING_DRAFT = {}
+STATE_TTL_SECONDS = int(os.getenv("STATE_TTL_SECONDS", 24 * 60 * 60))
+STATE_CLEANUP_INTERVAL = int(os.getenv("STATE_CLEANUP_INTERVAL", 60))
+USER_VOICE_MODE = ExpiringDict(STATE_TTL_SECONDS)  # Track which users have voice enabled
+USER_AUDIO_MODE = ExpiringDict(STATE_TTL_SECONDS)
+USER_LAST_MESSAGE = ExpiringDict(STATE_TTL_SECONDS)
+USER_LANG = ExpiringDict(STATE_TTL_SECONDS)
+CHAT_HISTORY = ExpiringDict(STATE_TTL_SECONDS)
+PENDING_DRAFT = ExpiringDict(STATE_TTL_SECONDS)
 MAX_HISTORY_MESSAGES = 7
 MAX_PROMPT_TOKENS = 8000
 
@@ -93,7 +96,7 @@ TELEGRAM_FILE_URL = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 
 # Thread storage
 THREAD_STORAGE_PATH = os.path.join(SUPPERTIME_DATA_PATH, "threads")
-USER_THREAD_ID = {}
+USER_THREAD_ID = ExpiringDict(STATE_TTL_SECONDS)
 
 # Emoji constants
 EMOJI = {
@@ -186,6 +189,28 @@ def save_cache():
             json.dump(OPENAI_CACHE, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+def start_state_cleanup_thread():
+    """Start a background thread to clear expired user state."""
+    def cleanup_loop():
+        while True:
+            for state in (
+                USER_VOICE_MODE,
+                USER_AUDIO_MODE,
+                USER_LAST_MESSAGE,
+                USER_LANG,
+                CHAT_HISTORY,
+                PENDING_DRAFT,
+                USER_THREAD_ID,
+            ):
+                state.cleanup()
+            time.sleep(STATE_CLEANUP_INTERVAL)
+
+    threading.Thread(target=cleanup_loop, daemon=True).start()
+
+
+start_state_cleanup_thread()
 
 def load_assistant_id():
     """Load the assistant ID from the file if it exists."""

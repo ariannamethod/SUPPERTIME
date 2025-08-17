@@ -4,6 +4,7 @@ from pinecone import Pinecone, ServerlessSpec
 import openai
 from tenacity import retry, stop_after_attempt, wait_fixed
 import datetime
+from utils.logger import logger
 
 EMBED_DIM = 1536
 
@@ -87,7 +88,8 @@ def semantic_search_in_file(fname, query, openai_api_key, top_k=5):
             with open(fname, "r", encoding="utf-8") as f:
                 all_chunks = chunk_text(f.read())
                 chunk_text_ = all_chunks[chunk_idx] if chunk_idx is not None and chunk_idx < len(all_chunks) else ""
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to read chunk from %s: %s", fname, e)
             chunk_text_ = ""
         if chunk_text_:
             chunks.append(chunk_text_)

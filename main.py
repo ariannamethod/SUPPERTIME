@@ -58,6 +58,7 @@ from utils.daily_reflection import (
     schedule_daily_reflection,
     load_last_reflection,
 )
+from utils.logger import logger
 
 # Constants and configuration
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
@@ -184,8 +185,8 @@ def save_cache():
         os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
         with open(CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(OPENAI_CACHE, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to save OpenAI cache: %s", e)
 
 def load_assistant_id():
     """Load the assistant ID from the file if it exists."""
@@ -219,8 +220,8 @@ def load_user_thread(user_id):
             with open(thread_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("thread_id")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to load thread for user %s: %s", user_id, e)
     return None
 
 def save_user_thread(user_id, thread_id):

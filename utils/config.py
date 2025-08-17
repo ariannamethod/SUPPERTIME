@@ -4,6 +4,7 @@ import json
 import hashlib
 import threading
 import time
+from utils.logger import logger
 
 from utils.whatdotheythinkiam import reflect_on_readme
 
@@ -23,7 +24,8 @@ def _load_snapshot():
     try:
         with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to load snapshot: %s", e)
         return {}
 
 
@@ -37,7 +39,8 @@ def _file_hash(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return hashlib.md5(f.read().encode("utf-8")).hexdigest()
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to hash file %s: %s", path, e)
         return ""
 
 
@@ -163,7 +166,8 @@ def explore_lit_directory():
                 if len(preview) > 100:
                     preview = preview[:100] + "..."
             report.append(f"\n**{file_name}** ({size_kb:.1f} KB) - {status}\nPreview: {preview}")
-        except Exception:
+        except Exception as e:
+            logger.warning("Error reading file %s: %s", path, e)
             report.append(f"\n**{file_name}** - {status} (Error reading file)")
     return "\n".join(report)
 

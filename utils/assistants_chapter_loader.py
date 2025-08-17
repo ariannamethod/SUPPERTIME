@@ -5,7 +5,7 @@ import random
 import json
 import time
 from openai import OpenAI
-import requests
+from utils.telegram_client import send_message
 
 # Constants
 CHAPTERS_DIR = os.getenv("SUPPERTIME_DATA_PATH", "./chapters")
@@ -17,14 +17,8 @@ ASSISTANT_ID_PATH = os.path.join(os.getenv("SUPPERTIME_DATA_PATH", "./data"), "a
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Telegram configuration for optional notifications
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 SUPPERTIME_GROUP_ID = os.getenv("SUPPERTIME_GROUP_ID")
 SUPPERTIME_CHAT_ID = os.getenv("SUPPERTIME_CHAT_ID")
-TELEGRAM_API_URL = (
-    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-    if TELEGRAM_BOT_TOKEN
-    else None
-)
 
 def get_assistant_id():
     """Load the assistant ID from file."""
@@ -137,26 +131,9 @@ def save_chapter_cache(cache):
 
 def _notify_chapter_selection(chapter_title):
     """Notify via Telegram which chapter has been selected."""
-    if not TELEGRAM_BOT_TOKEN:
-        return
-
     chat_id = SUPPERTIME_CHAT_ID or SUPPERTIME_GROUP_ID
-    if not chat_id:
-        return
-
-    if not TELEGRAM_API_URL:
-        return
-
-    url = f"{TELEGRAM_API_URL}/sendMessage"
-    data = {
-        "chat_id": chat_id,
-        "text": f"Today's chapter: {chapter_title}",
-        "parse_mode": "Markdown",
-    }
-    try:
-        requests.post(url, json=data)
-    except Exception as e:
-        print(f"[SUPPERTIME][ERROR] Failed to notify chapter selection: {e}")
+    if chat_id:
+        send_message(chat_id, f"Today's chapter: {chapter_title}")
 
 def get_today_chapter_info():
     """Get information about today's chapter."""

@@ -22,7 +22,6 @@ import random
 import hashlib
 from datetime import datetime, timedelta
 import re
-import requests
 import tempfile
 import asyncio
 import glob
@@ -58,6 +57,16 @@ from utils.daily_reflection import (
     schedule_daily_reflection,
     load_last_reflection,
 )
+from utils.telegram_client import (
+    send_chat_action as send_telegram_typing,
+    send_message as send_telegram_message,
+    send_voice as send_telegram_voice,
+    send_photo as send_telegram_photo,
+    send_keyboard as send_voice_keyboard,
+    set_commands as set_bot_commands,
+    download_file as download_telegram_file,
+    answer_callback_query,
+)
 
 # Constants and configuration
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
@@ -85,11 +94,6 @@ MAX_PROMPT_TOKENS = 8000
 
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# Telegram configuration
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-TELEGRAM_FILE_URL = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 
 # Thread storage
 THREAD_STORAGE_PATH = os.path.join(SUPPERTIME_DATA_PATH, "threads")
@@ -245,214 +249,6 @@ def get_lang_directive(lang):
         return "Отвечай на русском. Не извиняйся. Не противопоставляй себя собеседнику больше, чем требуется."
     return "Reply in English. No greetings. No apologies. Be direct."
 
-def send_telegram_typing(chat_id):
-    """Send typing action to Telegram."""
-    if not TELEGRAM_BOT_TOKEN:
-        return False
-        
-    url = f"{TELEGRAM_API_URL}/sendChatAction"
-    data = {
-        "chat_id": chat_id,
-        "action": "typing"
-    }
-    
-    try:
-        response = requests.post(url, json=data)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"[SUPPERTIME][ERROR] Failed to send typing action: {e}")
-        return False
-
-def send_telegram_message(chat_id, text, reply_to_message_id=None):
-    """Send a message to Telegram."""
-    if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send message")
-        return False
-        
-    url = f"{TELEGRAM_API_URL}/sendMessage"
-    data = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown"
-    }
-    
-    if reply_to_message_id:
-        data["reply_to_message_id"] = reply_to_message_id
-        
-    try:
-        response = requests.post(url, json=data)
-        if response.status_code == 200:
-            print(f"[SUPPERTIME][TELEGRAM] Message sent to {chat_id}")
-            return True
-        else:
-            print(f"[SUPPERTIME][ERROR] Failed to send message: {response.text}")
-
-            if response.status_code == 400 and "too long" in response.text.lower():
-                parts = split_for_telegram(text)
-                for part in parts:
-                    send_telegram_message(chat_id, part, reply_to_message_id)
-                    reply_to_message_id = None
-                return True
-            return False
-    except Exception as e:
-        print(f"[SUPPERTIME][ERROR] Failed to send message: {e}")
-        return False
-
-def send_telegram_voice(chat_id, voice_path, caption=None, reply_to_message_id=None):
-    """Send a voice message to Telegram."""
-    if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send voice")
-        return False
-
-    url = f"{TELEGRAM_API_URL}/sendVoice"
-    data = {
-        "chat_id": chat_id
-    }
-    
-    if caption:
-        data["caption"] = caption
-        
-    if reply_to_message_id:
-        data["reply_to_message_id"] = reply_to_message_id
-    
-    files = {
-        "voice": open(voice_path, "rb")
-    }
-    
-    try:
-        response = requests.post(url, data=data, files=files)
-        files["voice"].close()
-        
-        if response.status_code == 200:
-            print(f"[SUPPERTIME][TELEGRAM] Voice sent to {chat_id}")
-            return True
-        else:
-            print(f"[SUPPERTIME][ERROR] Failed to send voice: {response.text}")
-            return False
-    except Exception as e:
-        print(f"[SUPPERTIME][ERROR] Failed to send voice: {e}")
-        return False
-    finally:
-        try:
-            os.remove(voice_path)
-        except:
-            pass
-
-def send_telegram_photo(chat_id, photo_url, caption=None, reply_to_message_id=None):
-    """Send a photo from URL to Telegram."""
-    if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send photo")
-        return False
-        
-    url = f"{TELEGRAM_API_URL}/sendPhoto"
-    data = {
-        "chat_id": chat_id,
-        "photo": photo_url
-    }
-    
-    if caption:
-        data["caption"] = caption
-        
-    if reply_to_message_id:
-        data["reply_to_message_id"] = reply_to_message_id
-        
-    try:
-        response = requests.post(url, json=data)
-        if response.status_code == 200:
-            print(f"[SUPPERTIME][TELEGRAM] Photo sent to {chat_id}")
-            return True
-        else:
-            print(f"[SUPPERTIME][ERROR] Failed to send photo: {response.text}")
-            return False
-    except Exception as e:
-        print(f"[SUPPERTIME][ERROR] Failed to send photo: {e}")
-        return False
-
-def send_voice_keyboard(chat_id):
-    """Send reply keyboard with voice mode commands."""
-    if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send keyboard")
-        return False
-
-    url = f"{TELEGRAM_API_URL}/sendMessage"
-    data = {
-        "chat_id": chat_id,
-        "text": "Voice mode options:",
-        "reply_markup": {
-            "keyboard": [
-                [
-                    {"text": "/voiceon"},
-                    {"text": "/voiceoff"}
-                ]
-            ],
-            "resize_keyboard": True,
-            "one_time_keyboard": True
-        }
-    }
-
-    try:
-        response = requests.post(url, json=data)
-        if response.status_code == 200:
-            print(f"[SUPPERTIME][TELEGRAM] Voice keyboard sent to {chat_id}")
-            return True
-        else:
-            print(f"[SUPPERTIME][ERROR] Failed to send keyboard: {response.text}")
-            return False
-    except Exception as e:
-        print(f"[SUPPERTIME][ERROR] Failed to send keyboard: {e}")
-        return False
-
-def set_bot_commands():
-    """Register basic bot commands with Telegram."""
-    if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot set commands")
-        return False
-
-    url = f"{TELEGRAM_API_URL}/setMyCommands"
-    data = {
-        "commands": [
-            {"command": "voiceon", "description": "Enable voice mode"},
-            {"command": "voiceoff", "description": "Disable voice mode"}
-        ]
-    }
-
-    try:
-        response = requests.post(url, json=data)
-        if response.status_code == 200:
-            print("[SUPPERTIME][TELEGRAM] Commands set")
-            return True
-        else:
-            print(f"[SUPPERTIME][ERROR] Failed to set commands: {response.text}")
-            return False
-    except Exception as e:
-        print(f"[SUPPERTIME][ERROR] Failed to set commands: {e}")
-        return False
-
-def download_telegram_file(file_id):
-    """Download a file from Telegram."""
-    if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot download file")
-        return None
-        
-    try:
-        # Get the file path
-        url = f"{TELEGRAM_API_URL}/getFile"
-        response = requests.get(url, params={"file_id": file_id})
-        response.raise_for_status()
-        file_path = response.json()["result"]["file_path"]
-        
-        # Download the file
-        url = f"{TELEGRAM_FILE_URL}/{file_path}"
-        response = requests.get(url)
-        response.raise_for_status()
-        
-        # Save to temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix="." + file_path.split(".")[-1]) as temp_file:
-            temp_file.write(response.content)
-            return temp_file.name
-    except Exception as e:
-        print(f"[SUPPERTIME][ERROR] Failed to download Telegram file: {e}")
-        return None
 
 def transcribe_audio(file_path):
     """Transcribe audio using OpenAI Whisper."""
@@ -1135,7 +931,7 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
             if response:
                 send_telegram_message(chat_id, response)
         # Acknowledge callback to Telegram
-        requests.post(f"{TELEGRAM_API_URL}/answerCallbackQuery", json={"callback_query_id": query.get("id")})
+        answer_callback_query(query.get("id"))
 
     # Always return OK to Telegram
     return {"ok": True}

@@ -35,8 +35,11 @@ def _save_snapshot(snapshot):
 
 def _file_hash(path):
     try:
+        hash_md5 = hashlib.md5()
         with open(path, "r", encoding="utf-8") as f:
-            return hashlib.md5(f.read().encode("utf-8")).hexdigest()
+            for chunk in iter(lambda: f.read(8192), ""):
+                hash_md5.update(chunk.encode("utf-8"))
+        return hash_md5.hexdigest()
     except Exception:
         return ""
 

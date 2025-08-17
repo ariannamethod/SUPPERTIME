@@ -20,13 +20,11 @@ import time
 import json
 import random
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 import re
 import requests
 import tempfile
 import asyncio
-import glob
-import base64
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -51,7 +49,7 @@ from utils.config import (
     schedule_lit_check,
     schedule_identity_reflection,
 )
-from utils.resonator import schedule_resonance_creation, create_resonance_now
+from utils.resonator import schedule_resonance_creation
 import utils.resonator as resonator
 from utils.howru import schedule_howru
 from utils.daily_reflection import (
@@ -266,7 +264,7 @@ def send_telegram_typing(chat_id):
 def send_telegram_message(chat_id, text, reply_to_message_id=None):
     """Send a message to Telegram."""
     if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send message")
+        print("[SUPPERTIME][WARNING] Telegram bot token not set, cannot send message")
         return False
         
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -301,7 +299,7 @@ def send_telegram_message(chat_id, text, reply_to_message_id=None):
 def send_telegram_voice(chat_id, voice_path, caption=None, reply_to_message_id=None):
     """Send a voice message to Telegram."""
     if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send voice")
+        print("[SUPPERTIME][WARNING] Telegram bot token not set, cannot send voice")
         return False
 
     url = f"{TELEGRAM_API_URL}/sendVoice"
@@ -335,13 +333,13 @@ def send_telegram_voice(chat_id, voice_path, caption=None, reply_to_message_id=N
     finally:
         try:
             os.remove(voice_path)
-        except:
+        except Exception:
             pass
 
 def send_telegram_photo(chat_id, photo_url, caption=None, reply_to_message_id=None):
     """Send a photo from URL to Telegram."""
     if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send photo")
+        print("[SUPPERTIME][WARNING] Telegram bot token not set, cannot send photo")
         return False
         
     url = f"{TELEGRAM_API_URL}/sendPhoto"
@@ -371,7 +369,7 @@ def send_telegram_photo(chat_id, photo_url, caption=None, reply_to_message_id=No
 def send_voice_keyboard(chat_id):
     """Send reply keyboard with voice mode commands."""
     if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send keyboard")
+        print("[SUPPERTIME][WARNING] Telegram bot token not set, cannot send keyboard")
         return False
 
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -405,7 +403,7 @@ def send_voice_keyboard(chat_id):
 def set_bot_commands():
     """Register basic bot commands with Telegram."""
     if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot set commands")
+        print("[SUPPERTIME][WARNING] Telegram bot token not set, cannot set commands")
         return False
 
     url = f"{TELEGRAM_API_URL}/setMyCommands"
@@ -431,7 +429,7 @@ def set_bot_commands():
 def download_telegram_file(file_id):
     """Download a file from Telegram."""
     if not TELEGRAM_BOT_TOKEN:
-        print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot download file")
+        print("[SUPPERTIME][WARNING] Telegram bot token not set, cannot download file")
         return None
         
     try:
@@ -470,7 +468,7 @@ def transcribe_audio(file_path):
         # Clean up the temporary file
         try:
             os.remove(file_path)
-        except:
+        except Exception:
             pass
 
 def text_to_speech(text):
@@ -591,84 +589,100 @@ def ensure_assistant():
         print(f"[SUPPERTIME][ERROR] Failed to create assistant: {e}")
         return None
 
-def query_openai(prompt, chat_id=None):
+
+async def poll_run_status(thread_id, run_id, chat_id=None, timeout=60):
+    """Poll run status with exponential backoff and timeout."""
+    start = time.monotonic()
+    delay = 1
+    while True:
+        if time.monotonic() - start > timeout:
+            raise TimeoutError("SUPPERTIME timed out waiting for a response")
+
+        run = await asyncio.to_thread(
+            openai_client.beta.threads.runs.retrieve,
+            thread_id=thread_id,
+            run_id=run_id,
+        )
+
+        if run.status == "completed":
+            return run
+        if run.status in ["failed", "expired", "cancelled"]:
+            raise RuntimeError(f"SUPPERTIME encountered an issue: {run.status}")
+
+        if chat_id:
+            await asyncio.to_thread(send_telegram_typing, chat_id)
+
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 30)
+
+
+async def query_openai(prompt, chat_id=None):
     """Send a query to OpenAI's Assistants API."""
-    # Detect language
     lang = USER_LANG.get(chat_id) or detect_lang(prompt)
     USER_LANG[chat_id] = lang
-    
-    # First, ensure we have a valid assistant
+
     assistant_id = ensure_assistant()
     if not assistant_id:
         return "SUPPERTIME could not initialize. Try again later."
-    
-    # Get or create thread for this user
+
     thread_id = USER_THREAD_ID.get(chat_id)
     if not thread_id:
         thread_id = load_user_thread(chat_id)
-        
+
     if not thread_id:
         try:
-            thread = openai_client.beta.threads.create()
+            thread = await asyncio.to_thread(openai_client.beta.threads.create)
             thread_id = thread.id
             USER_THREAD_ID[chat_id] = thread_id
             save_user_thread(chat_id, thread_id)
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Failed to create thread: {e}")
             return "SUPPERTIME could not establish a connection. Try again later."
-    
-    # Check cache for identical prompts
+
     cache_key = f"{assistant_id}:{thread_id}:{prompt}"
     hash_key = hashlib.md5(cache_key.encode('utf-8')).hexdigest()
     if hash_key in OPENAI_CACHE:
         return OPENAI_CACHE[hash_key]
-    
+
     try:
-        # Add language directive to the message
         lang_directive = get_lang_directive(lang)
         enhanced_prompt = f"{lang_directive}\n\n{prompt}"
-        
-        # Add the user's message to the thread
-        openai_client.beta.threads.messages.create(
-            thread_id=thread_id, 
-            role="user", 
-            content=enhanced_prompt
-        )
-        
-        # Run the assistant
-        run = openai_client.beta.threads.runs.create(
+
+        await asyncio.to_thread(
+            openai_client.beta.threads.messages.create,
             thread_id=thread_id,
-            assistant_id=assistant_id
+            role="user",
+            content=enhanced_prompt,
         )
-        
-        # Wait for the run to complete
-        while True:
-            run = openai_client.beta.threads.runs.retrieve(
-                thread_id=thread_id, 
-                run_id=run.id
-            )
-            if run.status == "completed":
-                break
-            elif run.status in ["failed", "expired", "cancelled"]:
-                return f"SUPPERTIME encountered an issue: {run.status}"
-            # Send typing indicator every 3 seconds while processing
-            if chat_id:
-                send_telegram_typing(chat_id)
-            time.sleep(3)
-        
-        # Get the latest message from the thread
-        messages = openai_client.beta.threads.messages.list(thread_id=thread_id)
-        
-        # Extract the first assistant response
+
+        run = await asyncio.to_thread(
+            openai_client.beta.threads.runs.create,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+        )
+
+        poll_task = asyncio.create_task(
+            poll_run_status(thread_id, run.id, chat_id)
+        )
+        await poll_task
+
+        messages = await asyncio.to_thread(
+            openai_client.beta.threads.messages.list,
+            thread_id=thread_id,
+        )
+
         for message in messages.data:
             if message.role == "assistant":
                 answer = message.content[0].text.value
-                # Cache the response
                 OPENAI_CACHE[hash_key] = answer
                 save_cache()
                 return answer
-        
+
         return "SUPPERTIME is silent..."
+    except TimeoutError as e:
+        return str(e)
+    except RuntimeError as e:
+        return str(e)
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Assistant API failed: {e}")
         return "SUPPERTIME's connection was disrupted. Try again later."
@@ -776,7 +790,6 @@ def handle_document_message(msg):
         return
     
     file_name = document.get("file_name", "Unknown file")
-    mime_type = document.get("mime_type", "")
     file_id = document.get("file_id", "")
     
     # Send initial message that we're processing
@@ -794,7 +807,7 @@ def handle_document_message(msg):
     # Delete the temporary file after extraction
     try:
         os.remove(file_path)
-    except:
+    except Exception:
         pass
     
     if not file_text or file_text.startswith("[Unsupported file type"):
@@ -811,7 +824,7 @@ def handle_document_message(msg):
     send_telegram_typing(chat_id)
     
     # Process the document text
-    response = query_openai(summary_prompt, chat_id=user_id)
+    response = asyncio.run(query_openai(summary_prompt, chat_id=user_id))
     
     # Add supplemental response with higher chance
     if random.random() < 0.7:
@@ -905,7 +918,7 @@ def handle_text_message(msg):
                 # Now ask SUPPERTIME to process these results
                 if results and not results.startswith("No "):
                     interpretation_prompt = f"I searched my literary knowledge base for \"{query}\" and found these passages:\n\n{results}\n\nPlease interpret these findings in relation to the query."
-                    response = query_openai(interpretation_prompt, chat_id=user_id)
+                    response = asyncio.run(query_openai(interpretation_prompt, chat_id=user_id))
                     
                     # Send the response
                     send_telegram_message(chat_id, f"{EMOJI['memories']} {response}", reply_to_message_id=message_id)
@@ -952,7 +965,7 @@ def handle_text_message(msg):
                     
                     # Create a poetic caption in SUPPERTIME style
                     caption_prompt = f"Write a short, poetic caption for an image of: {draw_prompt}. Keep it under 100 characters."
-                    caption = query_openai(caption_prompt, chat_id=user_id)
+                    caption = asyncio.run(query_openai(caption_prompt, chat_id=user_id))
                     
                     # Send the image
                     send_telegram_photo(chat_id, image_url, caption=caption, reply_to_message_id=message_id)
@@ -979,7 +992,7 @@ def handle_text_message(msg):
         text = f"{text}\n\n[Content from URL ({url})]:\n{url_text}"
     
     # Process the message
-    response = query_openai(text, chat_id=user_id)
+    response = asyncio.run(query_openai(text, chat_id=user_id))
     
     # Add supplemental response with higher chance
     if random.random() < 0.7:
@@ -1038,7 +1051,7 @@ def handle_voice_message(msg):
     send_telegram_typing(chat_id)
     
     # Process the transcribed text
-    response = query_openai(transcribed_text, chat_id=user_id)
+    response = asyncio.run(query_openai(transcribed_text, chat_id=user_id))
     
     # Add supplemental response with higher chance
     if random.random() < 0.7:

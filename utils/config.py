@@ -21,8 +21,17 @@ SNAPSHOT_PATH = os.path.join(SUPPERTIME_DATA_PATH, "vectorized_snapshot.json")
 
 def _load_snapshot():
     try:
+        snapshot = {}
         with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    snapshot.update(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return snapshot
     except Exception:
         return {}
 
@@ -30,20 +39,30 @@ def _load_snapshot():
 def _save_snapshot(snapshot):
     os.makedirs(os.path.dirname(SNAPSHOT_PATH), exist_ok=True)
     with open(SNAPSHOT_PATH, "w", encoding="utf-8") as f:
-        json.dump(snapshot, f, ensure_ascii=False, indent=2)
+        for path, h in snapshot.items():
+            f.write(json.dumps({path: h}, ensure_ascii=False) + "\n")
 
 
-def _file_hash(path):
+def _file_hash(path, chunk_size=4096):
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return hashlib.md5(f.read().encode("utf-8")).hexdigest()
+        hasher = hashlib.md5()
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
     except Exception:
         return ""
 
 
 def vectorize_lit_files():
     """Vectorize new or updated literary files."""
-    lit_files = glob.glob(os.path.join(LIT_DIR, "*.txt")) + glob.glob(os.path.join(LIT_DIR, "*.md"))
+    lit_files = (
+        glob.glob(os.path.join(LIT_DIR, "*.txt"))
+        + glob.glob(os.path.join(LIT_DIR, "*.md"))
+    )
     if not lit_files:
         return "No literary files found in the lit directory."
 
@@ -81,10 +100,14 @@ def search_lit_files(query):
     results = []
     for file_path in lit_files:
         try:
-            chunks = semantic_search_in_file(file_path, query, os.getenv("OPENAI_API_KEY"), top_k=2)
+            chunks = semantic_search_in_file(
+                file_path, query, os.getenv("OPENAI_API_KEY"), top_k=2
+            )
             if chunks:
                 file_name = os.path.basename(file_path)
-                results.append(f"From {file_name}:\n\n" + "\n\n---\n\n".join(chunks))
+                results.append(
+                    f"From {file_name}:\n\n" + "\n\n---\n\n".join(chunks)
+                )
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Failed to search in {file_path}: {e}")
 
@@ -93,7 +116,7 @@ def search_lit_files(query):
     return "No relevant information found in the literary files."
 
 
-def _search_logs(query):
+def _search_logs(query, max_results=50, chunk_size=4096):
     """Search in journal and other data files for the query."""
     query_lower = query.lower()
     hits = []
@@ -104,15 +127,24 @@ def _search_logs(query):
         "who_is_real_me.md",
     ]
     for name in data_files:
+        if max_results and len(hits) >= max_results:
+            break
         path = os.path.join(SUPPERTIME_DATA_PATH, name)
         if not os.path.isfile(path):
             continue
         try:
             if name.endswith(".json"):
                 with open(path, "r", encoding="utf-8") as f:
-                    entries = json.load(f)
-                if isinstance(entries, list):
-                    for entry in entries:
+                    for line in f:
+                        if max_results and len(hits) >= max_results:
+                            break
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
                         text = json.dumps(entry, ensure_ascii=False)
                         if query_lower in text.lower():
                             ts = entry.get("ts", "?")
@@ -120,20 +152,28 @@ def _search_logs(query):
                             hits.append(f"[{name} @ {ts}] {snippet}")
             else:
                 with open(path, "r", encoding="utf-8") as f:
-                    text = f.read()
-                idx = text.lower().find(query_lower)
-                if idx != -1:
-                    snippet = text[max(0, idx - 50) : idx + 150]
-                    hits.append(f"[{name}] ...{snippet}...")
+                    prev = ""
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        text = prev + chunk
+                        idx = text.lower().find(query_lower)
+                        if idx != -1:
+                            snippet = text[max(0, idx - 50): idx + 150]
+                            hits.append(f"[{name}] ...{snippet}...")
+                            if max_results and len(hits) >= max_results:
+                                break
+                        prev = text[-len(query_lower) - 50:]
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Failed to search in {name}: {e}")
     return hits
 
 
-def search_memory(query):
+def search_memory(query, max_log_results=50):
     """Search both vectorized literary files and local logs."""
     lit_res = search_lit_files(query)
-    log_res = _search_logs(query)
+    log_res = _search_logs(query, max_results=max_log_results)
 
     pieces = []
     if lit_res and not lit_res.startswith("No "):
@@ -147,7 +187,10 @@ def search_memory(query):
 
 def explore_lit_directory():
     """Return information about literary files and their status."""
-    lit_files = glob.glob(os.path.join(LIT_DIR, "*.txt")) + glob.glob(os.path.join(LIT_DIR, "*.md"))
+    lit_files = (
+        glob.glob(os.path.join(LIT_DIR, "*.txt"))
+        + glob.glob(os.path.join(LIT_DIR, "*.md"))
+    )
     if not lit_files:
         return "No literary files found in the lit directory."
 
@@ -162,7 +205,10 @@ def explore_lit_directory():
                 preview = "".join(f.readlines()[:3]).strip()
                 if len(preview) > 100:
                     preview = preview[:100] + "..."
-            report.append(f"\n**{file_name}** ({size_kb:.1f} KB) - {status}\nPreview: {preview}")
+            report.append(
+                f"\n**{file_name}** ({size_kb:.1f} KB) - {status}\n"
+                f"Preview: {preview}"
+            )
         except Exception:
             report.append(f"\n**{file_name}** - {status} (Error reading file)")
     return "\n".join(report)

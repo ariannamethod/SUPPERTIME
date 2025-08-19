@@ -3,6 +3,7 @@ import json
 import datetime
 import threading
 import time
+import asyncio
 from utils.vector_store import add_memory_entry
 from utils.journal import log_event
 
@@ -16,7 +17,7 @@ def record_daily_reflection(text):
     metadata = {"type": "daily_reflection", "ts": ts}
     vector_id = None
     try:
-        vector_id = add_memory_entry(text, OPENAI_KEY, metadata)
+        vector_id = asyncio.run(add_memory_entry(text, OPENAI_KEY, metadata))
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Vector log failed: {e}")
     entry = {**metadata, "text": text, "vector_id": vector_id}

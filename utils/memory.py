@@ -3,6 +3,7 @@ import json
 from typing import List, Dict, Optional
 
 from utils.journal import log_event, LOG_PATH as JOURNAL_PATH
+import asyncio
 
 try:
     from utils import vector_store
@@ -52,7 +53,7 @@ class ConversationMemory:
         if vector_store and self.openai_client:
             try:
                 api_key = getattr(self.openai_client, "api_key", os.getenv("OPENAI_API_KEY", ""))
-                vector_store.add_memory_entry(summary, api_key, {"type": "summary"})
+                asyncio.run(vector_store.add_memory_entry(summary, api_key, {"type": "summary"}))
             except Exception:
                 pass
         self.buffer.clear()

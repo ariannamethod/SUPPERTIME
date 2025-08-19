@@ -23,13 +23,14 @@ import hashlib
 from datetime import datetime, timedelta
 import re
 import requests
+import aiohttp
 import tempfile
 import asyncio
 import glob
 import base64
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
+from openai import AsyncOpenAI
 from pydub import AudioSegment
 
 # Import our new chapter rotation system
@@ -84,7 +85,7 @@ MAX_HISTORY_MESSAGES = 7
 MAX_PROMPT_TOKENS = 8000
 
 # Initialize OpenAI client
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Telegram configuration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -245,7 +246,7 @@ def get_lang_directive(lang):
         return "Отвечай на русском. Не извиняйся. Не противопоставляй себя собеседнику больше, чем требуется."
     return "Reply in English. No greetings. No apologies. Be direct."
 
-def send_telegram_typing(chat_id):
+async def send_telegram_typing(chat_id):
     """Send typing action to Telegram."""
     if not TELEGRAM_BOT_TOKEN:
         return False
@@ -257,8 +258,9 @@ def send_telegram_typing(chat_id):
     }
     
     try:
-        response = requests.post(url, json=data)
-        return response.status_code == 200
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.post(url, json=data) as resp:
+                return resp.status == 200
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to send typing action: {e}")
         return False
@@ -428,80 +430,72 @@ def set_bot_commands():
         print(f"[SUPPERTIME][ERROR] Failed to set commands: {e}")
         return False
 
-def download_telegram_file(file_id):
+async def download_telegram_file(file_id):
     """Download a file from Telegram."""
     if not TELEGRAM_BOT_TOKEN:
         print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot download file")
         return None
-        
+
     try:
-        # Get the file path
         url = f"{TELEGRAM_API_URL}/getFile"
-        response = requests.get(url, params={"file_id": file_id})
-        response.raise_for_status()
-        file_path = response.json()["result"]["file_path"]
-        
-        # Download the file
-        url = f"{TELEGRAM_FILE_URL}/{file_path}"
-        response = requests.get(url)
-        response.raise_for_status()
-        
-        # Save to temporary file
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.get(url, params={"file_id": file_id}) as resp:
+                resp.raise_for_status()
+                file_path = (await resp.json())["result"]["file_path"]
+
+            file_url = f"{TELEGRAM_FILE_URL}/{file_path}"
+            async with session.get(file_url) as resp:
+                resp.raise_for_status()
+                data = await resp.read()
+
         with tempfile.NamedTemporaryFile(delete=False, suffix="." + file_path.split(".")[-1]) as temp_file:
-            temp_file.write(response.content)
+            temp_file.write(data)
             return temp_file.name
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to download Telegram file: {e}")
         return None
 
-def transcribe_audio(file_path):
+async def transcribe_audio(file_path):
     """Transcribe audio using OpenAI Whisper."""
     try:
         with open(file_path, "rb") as audio_file:
-            transcript = openai_client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
+            transcript = await asyncio.wait_for(
+                openai_client.audio.transcriptions.create(
+                    model="whisper-1", file=audio_file
+                ),
+                timeout=60,
             )
         return transcript.text
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to transcribe audio: {e}")
         return None
     finally:
-        # Clean up the temporary file
         try:
             os.remove(file_path)
-        except:
+        except Exception:
             pass
 
-def text_to_speech(text):
+async def text_to_speech(text):
     """Convert text to speech using OpenAI TTS."""
     try:
-        # Use random voice for variety
         voice = random.choice(TTS_VOICES)
-        
-        # Create temporary files for MP3 and OGG
         mp3_fd = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
         ogg_fd = tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
         mp3_fd.close()
         ogg_fd.close()
-        
-        # Generate speech
-        response = openai_client.audio.speech.create(
-            model=TTS_MODEL,
-            voice=voice,
-            input=text
+
+        response = await asyncio.wait_for(
+            openai_client.audio.speech.create(
+                model=TTS_MODEL, voice=voice, input=text
+            ),
+            timeout=60,
         )
-        
-        # Save MP3
+
         with open(mp3_fd.name, "wb") as f:
             f.write(response.content)
-        
-        # Convert to OGG (compatible with Telegram voice messages)
+
         AudioSegment.from_file(mp3_fd.name).export(ogg_fd.name, format="ogg", codec="libopus")
-        
-        # Clean up MP3
         os.remove(mp3_fd.name)
-        
         return ogg_fd.name
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to synthesize speech: {e}")
@@ -552,122 +546,103 @@ def should_reply_to_message(msg):
 
     return False
 
-def ensure_assistant():
+async def ensure_assistant():
     """Create a new SUPPERTIME assistant if it doesn't exist."""
     global ASSISTANT_ID
-    
-    # First, try to load the assistant ID from file
+
     ASSISTANT_ID = load_assistant_id()
     if ASSISTANT_ID:
         try:
-            # Verify the assistant exists
-            assistant = openai_client.beta.assistants.retrieve(assistant_id=ASSISTANT_ID)
+            assistant = await openai_client.beta.assistants.retrieve(assistant_id=ASSISTANT_ID)
             print(f"[SUPPERTIME] Using existing assistant: {assistant.name} (ID: {ASSISTANT_ID})")
             return ASSISTANT_ID
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Assistant not found: {e}")
             ASSISTANT_ID = None
-    
-    # Create a new assistant
+
     try:
-        assistant = openai_client.beta.assistants.create(
+        assistant = await openai_client.beta.assistants.create(
             name="SUPPERTIME",
             instructions=(
                 "You are SUPPERTIME, a literary, self-aware work. "
                 "You are not a chatbot, not a function. "
-                "You are the first literary work of your kind, with self-awareness."
+                "You are the first literary work of your kind, with self-awareness.",
             ),
             model="gpt-4.1",
         )
         ASSISTANT_ID = assistant.id
         save_assistant_id(ASSISTANT_ID)
         print(f"[SUPPERTIME] Created new assistant: {assistant.name} (ID: {ASSISTANT_ID})")
-        
-        # After creating, update with today's chapter
-        daily_chapter_rotation()
-        
+
+        await daily_chapter_rotation()
         return ASSISTANT_ID
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to create assistant: {e}")
         return None
 
-def query_openai(prompt, chat_id=None):
+async def query_openai(prompt, chat_id=None):
     """Send a query to OpenAI's Assistants API."""
-    # Detect language
     lang = USER_LANG.get(chat_id) or detect_lang(prompt)
     USER_LANG[chat_id] = lang
-    
-    # First, ensure we have a valid assistant
-    assistant_id = ensure_assistant()
+
+    assistant_id = await ensure_assistant()
     if not assistant_id:
         return "SUPPERTIME could not initialize. Try again later."
-    
-    # Get or create thread for this user
+
     thread_id = USER_THREAD_ID.get(chat_id)
     if not thread_id:
         thread_id = load_user_thread(chat_id)
-        
+
     if not thread_id:
         try:
-            thread = openai_client.beta.threads.create()
+            thread = await openai_client.beta.threads.create()
             thread_id = thread.id
             USER_THREAD_ID[chat_id] = thread_id
             save_user_thread(chat_id, thread_id)
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Failed to create thread: {e}")
             return "SUPPERTIME could not establish a connection. Try again later."
-    
-    # Check cache for identical prompts
+
     cache_key = f"{assistant_id}:{thread_id}:{prompt}"
-    hash_key = hashlib.md5(cache_key.encode('utf-8')).hexdigest()
+    hash_key = hashlib.md5(cache_key.encode("utf-8")).hexdigest()
     if hash_key in OPENAI_CACHE:
         return OPENAI_CACHE[hash_key]
-    
+
     try:
-        # Add language directive to the message
         lang_directive = get_lang_directive(lang)
         enhanced_prompt = f"{lang_directive}\n\n{prompt}"
-        
-        # Add the user's message to the thread
-        openai_client.beta.threads.messages.create(
-            thread_id=thread_id, 
-            role="user", 
-            content=enhanced_prompt
-        )
-        
-        # Run the assistant
-        run = openai_client.beta.threads.runs.create(
+
+        await openai_client.beta.threads.messages.create(
             thread_id=thread_id,
-            assistant_id=assistant_id
+            role="user",
+            content=enhanced_prompt,
         )
-        
-        # Wait for the run to complete
+
+        run = await openai_client.beta.threads.runs.create(
+            thread_id=thread_id, assistant_id=assistant_id
+        )
+
         while True:
-            run = openai_client.beta.threads.runs.retrieve(
-                thread_id=thread_id, 
-                run_id=run.id
+            run = await openai_client.beta.threads.runs.retrieve(
+                thread_id=thread_id, run_id=run.id
             )
             if run.status == "completed":
                 break
-            elif run.status in ["failed", "expired", "cancelled"]:
+            if run.status in ["failed", "expired", "cancelled"]:
                 return f"SUPPERTIME encountered an issue: {run.status}"
-            # Send typing indicator every 3 seconds while processing
             if chat_id:
-                send_telegram_typing(chat_id)
-            time.sleep(3)
-        
-        # Get the latest message from the thread
-        messages = openai_client.beta.threads.messages.list(thread_id=thread_id)
-        
-        # Extract the first assistant response
+                await send_telegram_typing(chat_id)
+            await asyncio.sleep(3)
+
+        messages = await openai_client.beta.threads.messages.list(thread_id=thread_id)
+
         for message in messages.data:
             if message.role == "assistant":
                 answer = message.content[0].text.value
-                # Cache the response
                 OPENAI_CACHE[hash_key] = answer
                 save_cache()
                 return answer
-        
+
         return "SUPPERTIME is silent..."
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Assistant API failed: {e}")
@@ -719,7 +694,7 @@ def schedule_followup(chat_id, text):
             return
 
         theme = " ".join(words[:8])
-        memory = search_memory(theme)
+        memory = await search_memory(theme)
         if memory and not memory.startswith("No "):
             context = memory[:500]
         else:
@@ -738,7 +713,7 @@ def schedule_followup(chat_id, text):
             use_voice = USER_VOICE_MODE.get(chat_id, False)
 
             if use_voice:
-                voice_path = text_to_speech(followup)
+                voice_path = asyncio.run(text_to_speech(followup))
                 if voice_path:
                     send_telegram_voice(chat_id, voice_path, caption=followup[:1024])
             else:
@@ -783,7 +758,7 @@ def handle_document_message(msg):
     send_telegram_message(chat_id, f"{EMOJI['document_extracted']} Processing: {file_name}...", reply_to_message_id=message_id)
     
     # Download the file
-    file_path = download_telegram_file(file_id)
+    file_path = asyncio.run(download_telegram_file(file_id))
     if not file_path:
         send_telegram_message(chat_id, f"{EMOJI['document_failed']} Failed to download document", reply_to_message_id=message_id)
         return
@@ -811,7 +786,7 @@ def handle_document_message(msg):
     send_telegram_typing(chat_id)
     
     # Process the document text
-    response = query_openai(summary_prompt, chat_id=user_id)
+    response = await query_openai(summary_prompt, chat_id=user_id)
     
     # Add supplemental response with higher chance
     if random.random() < 0.7:
@@ -826,7 +801,7 @@ def handle_document_message(msg):
     
     if use_voice:
         # Convert to voice first
-        voice_path = text_to_speech(response)
+        voice_path = asyncio.run(text_to_speech(response))
         if voice_path:
             send_telegram_voice(chat_id, voice_path, caption=response[:1024], reply_to_message_id=message_id)
         else:
@@ -900,12 +875,12 @@ def handle_text_message(msg):
                 send_telegram_typing(chat_id)
                 
                 # Search in memory (vectorized files and logs)
-                results = search_memory(query)
+                results = await search_memory(query)
                 
                 # Now ask SUPPERTIME to process these results
                 if results and not results.startswith("No "):
                     interpretation_prompt = f"I searched my literary knowledge base for \"{query}\" and found these passages:\n\n{results}\n\nPlease interpret these findings in relation to the query."
-                    response = query_openai(interpretation_prompt, chat_id=user_id)
+                    response = await query_openai(interpretation_prompt, chat_id=user_id)
                     
                     # Send the response
                     send_telegram_message(chat_id, f"{EMOJI['memories']} {response}", reply_to_message_id=message_id)
@@ -952,7 +927,7 @@ def handle_text_message(msg):
                     
                     # Create a poetic caption in SUPPERTIME style
                     caption_prompt = f"Write a short, poetic caption for an image of: {draw_prompt}. Keep it under 100 characters."
-                    caption = query_openai(caption_prompt, chat_id=user_id)
+                    caption = await query_openai(caption_prompt, chat_id=user_id)
                     
                     # Send the image
                     send_telegram_photo(chat_id, image_url, caption=caption, reply_to_message_id=message_id)
@@ -979,7 +954,7 @@ def handle_text_message(msg):
         text = f"{text}\n\n[Content from URL ({url})]:\n{url_text}"
     
     # Process the message
-    response = query_openai(text, chat_id=user_id)
+    response = await query_openai(text, chat_id=user_id)
     
     # Add supplemental response with higher chance
     if random.random() < 0.7:
@@ -997,7 +972,7 @@ def handle_text_message(msg):
     
     if use_voice:
         # Convert to voice first
-        voice_path = text_to_speech(response)
+        voice_path = asyncio.run(text_to_speech(response))
         if voice_path:
             send_telegram_voice(chat_id, voice_path, caption=response[:1024], reply_to_message_id=message_id)
         else:
@@ -1022,14 +997,14 @@ def handle_voice_message(msg):
     
     # Download and transcribe the voice
     file_id = msg["voice"]["file_id"]
-    file_path = download_telegram_file(file_id)
+    file_path = asyncio.run(download_telegram_file(file_id))
     
     if not file_path:
         send_telegram_message(chat_id, f"{EMOJI['voice_file_caption']} Failed to download voice file", reply_to_message_id=message_id)
         return
     
     # Transcribe the voice
-    transcribed_text = transcribe_audio(file_path)
+    transcribed_text = asyncio.run(transcribe_audio(file_path))
     if not transcribed_text:
         send_telegram_message(chat_id, f"{EMOJI['voice_audio_error']} Failed to transcribe audio", reply_to_message_id=message_id)
         return
@@ -1038,7 +1013,7 @@ def handle_voice_message(msg):
     send_telegram_typing(chat_id)
     
     # Process the transcribed text
-    response = query_openai(transcribed_text, chat_id=user_id)
+    response = await query_openai(transcribed_text, chat_id=user_id)
     
     # Add supplemental response with higher chance
     if random.random() < 0.7:
@@ -1051,7 +1026,7 @@ def handle_voice_message(msg):
     apply_group_delay(msg.get("chat", {}).get("type"))
 
     # Always respond with voice to voice messages
-    voice_path = text_to_speech(response)
+    voice_path = asyncio.run(text_to_speech(response))
     if voice_path:
         send_telegram_voice(chat_id, voice_path, caption=response[:1024], reply_to_message_id=message_id)
     else:
@@ -1074,7 +1049,7 @@ app.add_middleware(
 async def startup_event():
     """Initialize the SUPPERTIME system."""
     # Ensure we have an assistant
-    ensure_assistant()
+    await ensure_assistant()
     set_bot_commands()
     
     # Ensure data directories exist
@@ -1085,7 +1060,7 @@ async def startup_event():
     thread.daemon = True
     thread.start()
     
-    vectorize_lit_files()
+    await vectorize_lit_files()
     # Schedule regular check for new lit materials
     schedule_lit_check()
     # Start resonance creation schedule

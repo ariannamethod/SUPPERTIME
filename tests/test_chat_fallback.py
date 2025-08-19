@@ -6,8 +6,14 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 # Stub vector_store to avoid network calls during import
 stub_vs = types.ModuleType("utils.vector_store")
-stub_vs.vectorize_file = lambda *a, **k: None
-stub_vs.semantic_search_in_file = lambda *a, **k: []
+async def _vec(*a, **k):
+    return None
+
+async def _search(*a, **k):
+    return []
+
+stub_vs.vectorize_file = _vec
+stub_vs.semantic_search_in_file = _search
 sys.modules["utils.vector_store"] = stub_vs
 
 from fastapi.testclient import TestClient

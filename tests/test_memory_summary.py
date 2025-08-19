@@ -7,7 +7,10 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 # Stub vector_store to avoid network calls
 stub_vs = types.ModuleType("utils.vector_store")
-stub_vs.add_memory_entry = lambda *a, **k: None
+async def _add(*a, **k):
+    return None
+
+stub_vs.add_memory_entry = _add
 sys.modules["utils.vector_store"] = stub_vs
 
 from utils import journal  # noqa: E402

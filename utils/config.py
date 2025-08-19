@@ -4,6 +4,7 @@ import json
 import hashlib
 import threading
 import time
+import asyncio
 
 from utils.whatdotheythinkiam import reflect_on_readme
 
@@ -41,7 +42,7 @@ def _file_hash(path):
         return ""
 
 
-def vectorize_lit_files():
+async def vectorize_lit_files():
     """Vectorize new or updated literary files."""
     lit_files = glob.glob(os.path.join(LIT_DIR, "*.txt")) + glob.glob(os.path.join(LIT_DIR, "*.md"))
     if not lit_files:
@@ -55,7 +56,7 @@ def vectorize_lit_files():
             continue
         if snapshot.get(path) != h:
             try:
-                vectorize_file(path, os.getenv("OPENAI_API_KEY"))
+                await vectorize_file(path, os.getenv("OPENAI_API_KEY"))
                 snapshot[path] = h
                 changed.append(path)
             except Exception as e:
@@ -72,7 +73,7 @@ def get_vectorized_files():
     return list(snapshot.keys())
 
 
-def search_lit_files(query):
+async def search_lit_files(query):
     """Search vectorized literary files for a query."""
     lit_files = get_vectorized_files()
     if not lit_files:
@@ -81,7 +82,9 @@ def search_lit_files(query):
     results = []
     for file_path in lit_files:
         try:
-            chunks = semantic_search_in_file(file_path, query, os.getenv("OPENAI_API_KEY"), top_k=2)
+            chunks = await semantic_search_in_file(
+                file_path, query, os.getenv("OPENAI_API_KEY"), top_k=2
+            )
             if chunks:
                 file_name = os.path.basename(file_path)
                 results.append(f"From {file_name}:\n\n" + "\n\n---\n\n".join(chunks))
@@ -130,9 +133,9 @@ def _search_logs(query):
     return hits
 
 
-def search_memory(query):
+async def search_memory(query):
     """Search both vectorized literary files and local logs."""
-    lit_res = search_lit_files(query)
+    lit_res = await search_lit_files(query)
     log_res = _search_logs(query)
 
     pieces = []
@@ -172,7 +175,10 @@ def schedule_lit_check(interval_hours=72):
     """Periodically check the lit folder for new files."""
     def _loop():
         while True:
-            vectorize_lit_files()
+            try:
+                asyncio.run(vectorize_lit_files())
+            except Exception as e:
+                print(f"[SUPPERTIME][ERROR] vectorize_lit_files failed: {e}")
             time.sleep(interval_hours * 3600)
 
     thread = threading.Thread(target=_loop, daemon=True)

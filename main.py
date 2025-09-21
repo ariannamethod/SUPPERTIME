@@ -732,7 +732,7 @@ def is_spam(chat_id, text):
 def apply_group_delay(chat_type):
     """Apply a random delay for group messages."""
     if chat_type in ("group", "supergroup"):
-        time.sleep(random.uniform(40, 240))
+        time.sleep(random.uniform(5, 10))
 
 def log_history(chat_id, text):
     """Keep last 20 messages per user for spontaneous outreach."""

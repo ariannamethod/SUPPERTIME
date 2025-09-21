@@ -13,13 +13,37 @@ PINECONE_REGION = os.getenv("PINECONE_REGION", "us-west-2")
 PINECONE_CLOUD = os.getenv("PINECONE_CLOUD", "aws")
 
 pc = None
-index = None
+
+
+class PineconeIndexProxy:
+    """Proxy object that binds to a Pinecone index when available."""
+
+    def __init__(self):
+        self._inner = None
+
+    def bind(self, inner):
+        self._inner = inner
+
+    @property
+    def ready(self):
+        return self._inner is not None
+
+    def __getattr__(self, name):
+        if self._inner is None:
+            raise ConnectionError("Pinecone index is not initialized")
+        return getattr(self._inner, name)
+
+    def __bool__(self):
+        return self.ready
+
+
+index = PineconeIndexProxy()
 
 
 def init_index():
     """Initialize Pinecone client and index on demand."""
-    global pc, index
-    if index is not None:
+    global pc
+    if index.ready:
         return index
     try:
         pc = Pinecone(api_key=PINECONE_API_KEY)
@@ -33,9 +57,8 @@ def init_index():
                     region=PINECONE_REGION
                 )
             )
-        index = pc.Index(PINECONE_INDEX)
+        index.bind(pc.Index(PINECONE_INDEX))
     except Exception as exc:
-        index = None
         raise ConnectionError("Unable to initialize Pinecone index") from exc
     return index
 
@@ -64,8 +87,7 @@ def chunk_text(text, chunk_size=900, overlap=120):
 
 def vectorize_file(fname, openai_api_key):
     """Vectorizes only one file."""
-    global index
-    if index is None:
+    if not index.ready:
         try:
             init_index()
         except Exception as exc:
@@ -90,8 +112,7 @@ def vectorize_file(fname, openai_api_key):
     return ids
 
 def semantic_search_in_file(fname, query, openai_api_key, top_k=5):
-    global index
-    if index is None:
+    if not index.ready:
         try:
             init_index()
         except Exception as exc:
@@ -133,8 +154,7 @@ def add_memory_entry(text, openai_api_key, metadata=None):
         metadata = {}
     ts = datetime.datetime.utcnow().isoformat()
     entry_id = metadata.get("id", f"memory-{ts}")
-    global index
-    if index is None:
+    if not index.ready:
         try:
             init_index()
         except Exception as exc:
@@ -151,10 +171,9 @@ def add_memory_entry(text, openai_api_key, metadata=None):
 
 def fetch_entries(ids):
     """Fetch entries by ID from Pinecone."""
-    global index
     if not ids:
         return {}
-    if index is None:
+    if not index.ready:
         try:
             init_index()
         except Exception as exc:

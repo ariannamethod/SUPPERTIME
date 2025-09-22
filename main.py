@@ -39,7 +39,7 @@ from utils.assistants_chapter_loader import (
     run_midnight_rotation_daemon,
     get_today_chapter_info,
 )
-from utils.etiquette import generate_response
+from utils.etiquette import generate_response, build_system_prompt
 from utils.journal import wilderness_log
 from utils.tools import split_for_telegram, send_long_message
 from utils.text_helpers import extract_text_from_url
@@ -59,7 +59,6 @@ from utils.daily_reflection import (
     schedule_daily_reflection,
     load_last_reflection,
 )
-from utils.prompt_builder import compose_assistant_instructions
 
 # Constants and configuration
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
@@ -618,19 +617,20 @@ def ensure_assistant():
     """Ensure the SUPPERTIME assistant exists and has the latest instructions."""
     global ASSISTANT_ID
 
-    instructions = compose_assistant_instructions()
+    instructions = build_system_prompt()
 
     # First, try to load the assistant ID from file
     ASSISTANT_ID = load_assistant_id()
     if ASSISTANT_ID:
         try:
             assistant = openai_client.beta.assistants.retrieve(assistant_id=ASSISTANT_ID)
-            if getattr(assistant, "instructions", "") != instructions:
+            current_prompt = getattr(assistant, "instructions", "") or ""
+            if current_prompt != instructions:
                 openai_client.beta.assistants.update(
                     assistant_id=ASSISTANT_ID,
                     instructions=instructions,
                 )
-                print("[SUPPERTIME] Assistant instructions refreshed from latest prompt context.")
+                print("[SUPPERTIME] Assistant instructions refreshed from etiquette prompt.")
             else:
                 print(f"[SUPPERTIME] Using existing assistant: {assistant.name} (ID: {ASSISTANT_ID})")
             return ASSISTANT_ID

@@ -151,7 +151,6 @@ def _notify_chapter_selection(chapter_title):
     data = {
         "chat_id": chat_id,
         "text": f"Today's chapter: {chapter_title}",
-        "parse_mode": "Markdown",
     }
     try:
         requests.post(url, json=data)

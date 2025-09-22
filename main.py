@@ -289,22 +289,24 @@ def send_telegram_typing(chat_id):
         print(f"[SUPPERTIME][ERROR] Failed to send typing action: {e}")
         return False
 
-def send_telegram_message(chat_id, text, reply_to_message_id=None):
+def send_telegram_message(chat_id, text, reply_to_message_id=None, parse_mode="Markdown", _retry=False):
     """Send a message to Telegram."""
     if not TELEGRAM_BOT_TOKEN:
         print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send message")
         return False
-        
+
     url = f"{TELEGRAM_API_URL}/sendMessage"
     data = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown"
     }
-    
+
+    if parse_mode:
+        data["parse_mode"] = parse_mode
+
     if reply_to_message_id:
         data["reply_to_message_id"] = reply_to_message_id
-        
+
     try:
         response = requests.post(url, json=data)
         if response.status_code == 200:
@@ -313,10 +315,31 @@ def send_telegram_message(chat_id, text, reply_to_message_id=None):
         else:
             print(f"[SUPPERTIME][ERROR] Failed to send message: {response.text}")
 
-            if response.status_code == 400 and "too long" in response.text.lower():
+            error_text = response.text.lower()
+
+            if (
+                parse_mode
+                and not _retry
+                and "can't parse entities" in error_text
+            ):
+                print("[SUPPERTIME][WARNING] Telegram markdown parsing failed, retrying without formatting")
+                return send_telegram_message(
+                    chat_id,
+                    text,
+                    reply_to_message_id=reply_to_message_id,
+                    parse_mode=None,
+                    _retry=True,
+                )
+
+            if response.status_code == 400 and "too long" in error_text:
                 parts = split_for_telegram(text)
                 for part in parts:
-                    send_telegram_message(chat_id, part, reply_to_message_id)
+                    send_telegram_message(
+                        chat_id,
+                        part,
+                        reply_to_message_id,
+                        parse_mode=parse_mode,
+                    )
                     reply_to_message_id = None
                 return True
             return False

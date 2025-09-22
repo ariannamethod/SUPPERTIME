@@ -18,7 +18,7 @@ def test_file_hash(monkeypatch, tmp_path):
 
     file_path = tmp_path / "x.txt"
     file_path.write_text("hello", encoding="utf-8")
-    expected = hashlib.md5(b"hello").hexdigest()
+    expected = hashlib.sha256(b"hello").hexdigest()
     assert config._file_hash(str(file_path)) == expected
     assert config._file_hash(str(tmp_path / "missing.txt")) == ""
 

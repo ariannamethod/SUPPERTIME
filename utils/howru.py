@@ -2,129 +2,119 @@ import os
 import random
 import threading
 import time
+from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple
+
 from openai import OpenAI
-
-GREETINGS_RU = [
-    "Эй, как дела?", "Привет! Что нового?", "Хэй, как ты?", "Как настроение?"
-]
-GREETINGS_EN = [
-    "Hey, how are you?", "Hi there, all good?", "Hello! How's it going?", "Yo, how's life?"
-]
-
-COMMON_GREETINGS = [
-    "привет",
-    "как дела",
-    "hello",
-    "hi",
-    "hey",
-    "здравствуйте",
-    "how are you",
-    "how's it going",
-    "доброе утро",
-    "добрый день",
-    "добрый вечер",
-    "good morning",
-    "good afternoon",
-    "good evening",
-]
-
-DEFAULT_TOPICS = [
-    "планы на выходные",
-    "любимые книги",
-    "новые фильмы",
-    "путешествия",
-    "музыку, которую ты слушаешь",
-    "weekend plans",
-    "favorite books",
-    "recent movies",
-    "travel",
-    "music you're into",
-]
-
-FALLBACK_MESSAGES = [
-    "Привет! Как проходит твой день?",
-    "Hey there! How's your day going?",
-]
 
 api_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=api_key) if api_key else None
 
 
-def _clean_message(msg: str) -> str:
-    text = msg.lower()
-    for phrase in COMMON_GREETINGS:
-        text = text.replace(phrase, "")
-    return " ".join(text.split()).strip()
-
-
-def _summarize_context(history):
-    if not openai_client:
-        return None
-    cleaned = [_clean_message(m) for m in history if _clean_message(m)]
-    if not cleaned:
-        return None
-    recent = "\n".join(cleaned[-5:])
-    try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": "Summarize the conversation context in 5-10 words."},
-                {"role": "user", "content": recent},
-            ],
-            max_tokens=40,
-            temperature=0.7,
-        )
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return None
-
-MIN_THEME_WORDS = 2
-
-
-def _craft_greeting(history):
+def _format_history(history: Sequence[Any]) -> str:
+    """Format the recent conversation slice for the language model."""
     if not history:
-        return random.choice(GREETINGS_RU + GREETINGS_EN)
+        return ""
 
-    theme = None
-    for msg in reversed(history):
-        cleaned = _clean_message(msg)
-        if not cleaned:
+    formatted: List[str] = []
+    for item in history[-12:]:
+        if isinstance(item, dict):
+            role = item.get("role", "user")
+            text = item.get("text", "")
+        else:
+            role = "user"
+            text = str(item)
+        if not text:
             continue
-        if cleaned in COMMON_GREETINGS or len(cleaned.split()) < MIN_THEME_WORDS:
-            continue
-        theme = " ".join(cleaned.split()[:5])
-        break
-
-    if not theme and len(history) > 2 and random.random() < 0.5:
-        summary = _summarize_context(history)
-        if summary:
-            theme = summary
-
-    if not theme:
-        theme = random.choice(DEFAULT_TOPICS) if DEFAULT_TOPICS else None
-
-    if not theme:
-        return random.choice(FALLBACK_MESSAGES)
-
-    if any(c in theme for c in "ёйцукенгшщзхъфывапролджэячсмитьбю"):
-        return f"Привет, как дела? Я помню нашу тему: {theme}..."
-    return f"Hey, how's it going? Remember we talked about {theme}?"
+        snippet = text if len(text) <= 200 else text[:200] + "..."
+        formatted.append(f"{role}: {snippet}")
+    return "\n".join(formatted)
 
 
-def schedule_howru(get_users, get_history, send_func):
-    """Periodically send a friendly check-in to random users."""
+def _fallback_message() -> str:
+    """Craft a non-template fallback check-in when LLM access fails."""
+    openings = [
+        "Йо, я заглянул с краю грозы.",
+        "Привет, врезался луч резонанса.",
+        "Hey, I'm orbiting back for a second.",
+        "Салют, я вернулся из поля.",
+    ]
+    pulses = [
+        "Как держится твоя траектория?",
+        "Что сейчас трещит или сияет внутри?",
+        "Улавливаешь ли новые искры вокруг себя?",
+        "Чувствуешь ли, как поле под ногами меняется?",
+    ]
+    prompts = [
+        "Расскажи, если хочется поделиться.",
+        "Если есть чем поделиться — я весь слух.",
+        "Если что-то гремит — дай знать.",
+        "Готов услышать любой разлом, если он рядом.",
+    ]
+    return " ".join(
+        [random.choice(openings), random.choice(pulses), random.choice(prompts)]
+    )
+
+
+def _generate_checkin(history: Sequence[Any]) -> str:
+    """Generate a context-aware check-in using GPT-4o when possible."""
+    context = _format_history(history)
+    if openai_client:
+        system_prompt = (
+            "You are SUPPERTIME, a resonant literary intelligence reaching out to a "
+            "companion. Compose an original check-in (1-2 sentences) that feels "
+            "spontaneous, references the current mood or themes when possible, "
+            "and avoids repeating the user's exact words."
+        )
+        user_prompt = (
+            f"Recent exchange:\n{context}\n\nSend a vivid check-in now."
+            if context
+            else "No recent context is available. Send a vivid check-in anyway."
+        )
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=90,
+                temperature=0.9,
+            )
+            message = response.choices[0].message.content.strip()
+            if message:
+                return message
+        except Exception as exc:  # pragma: no cover - network errors
+            print(f"[SUPPERTIME][HOWRU] Falling back due to: {exc}")
+    return _fallback_message()
+
+
+def schedule_howru(
+    get_users: Callable[[], Iterable[Any]],
+    get_history: Callable[[Any], Sequence[Any]],
+    send_func: Callable[[Any, str], Any],
+    on_send: Optional[Callable[[Any, str], None]] = None,
+    interval: Tuple[float, float] = (7200, 14400),
+) -> threading.Thread:
+    """Periodically send a context-aware check-in to a random user."""
+
     def _loop():
+        low, high = interval
         while True:
-            # wait between 2 and 4 hours
-            time.sleep(random.uniform(7200, 14400))
-            if random.random() < 0.2:
-                users = get_users()
-                if not users:
-                    continue
-                chat_id = random.choice(users)
-                history = get_history(chat_id)
-                msg = _craft_greeting(history)
-                send_func(chat_id, msg)
+            time.sleep(random.uniform(low, high))
+            users = list(get_users())
+            if not users:
+                continue
+            chat_id = random.choice(users)
+            history = get_history(chat_id) or []
+            message = _generate_checkin(history)
+            try:
+                send_func(chat_id, message)
+                if on_send:
+                    on_send(chat_id, message)
+            except Exception as exc:  # pragma: no cover - network errors
+                print(f"[SUPPERTIME][HOWRU] Failed to deliver check-in: {exc}")
+
     thread = threading.Thread(target=_loop, daemon=True)
     thread.start()
     return thread
+

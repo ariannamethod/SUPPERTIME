@@ -38,7 +38,7 @@ class ConversationMemory:
         if self.openai_client:
             try:
                 resp = self.openai_client.chat.completions.create(
-                    model="gpt-4.1",
+                    model="gpt-4o",
                     messages=[
                         {"role": "system", "content": "Summarize the conversation in under 100 words."},
                         {"role": "user", "content": text},

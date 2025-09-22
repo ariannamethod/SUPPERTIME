@@ -7,6 +7,7 @@ import threading
 from utils.whatdotheythinkiam import reflect_on_readme
 
 from utils.vector_store import vectorize_file, semantic_search_in_file
+from utils.snapshot_store import upsert_snapshot
 
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
 LIT_DIR = os.path.join(SUPPERTIME_DATA_PATH, "lit")
@@ -65,6 +66,19 @@ def vectorize_lit_files():
                 changed.append(path)
             except Exception as e:
                 print(f"[SUPPERTIME][ERROR] Failed to vectorize {path}: {e}")
+    if snapshot:
+        try:
+            upsert_snapshot(
+                "literary_vector",
+                snapshot,
+                metadata={
+                    "file_count": len(snapshot),
+                    "indexed": len(changed),
+                },
+            )
+        except Exception as e:
+            print(f"[SUPPERTIME][ERROR] Failed to record snapshot: {e}")
+
     if changed:
         _save_snapshot(snapshot)
         return f"Indexed {len(changed)} files."

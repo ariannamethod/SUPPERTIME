@@ -1256,12 +1256,22 @@ app.add_middleware(
 async def startup_event():
     """Initialize the SUPPERTIME system."""
     # Ensure we have an assistant
-    ensure_assistant()
+    assistant_id = ensure_assistant()
     set_bot_commands()
-    
+
     # Ensure data directories exist
     ensure_data_dirs()
-    
+
+    if assistant_id:
+        rotation_result = await asyncio.to_thread(daily_chapter_rotation)
+        if not rotation_result.get("success", False):
+            print(
+                "[SUPPERTIME][ERROR] Immediate chapter rotation failed: "
+                f"{rotation_result.get('error', 'Unknown error')}"
+            )
+    else:
+        print("[SUPPERTIME][WARNING] Assistant unavailable; skipping initial chapter sync.")
+
     # Start the midnight rotation daemon in a separate thread
     thread = threading.Thread(target=run_midnight_rotation_daemon)
     thread.daemon = True

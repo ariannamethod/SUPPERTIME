@@ -963,9 +963,9 @@ async def handle_document_message(msg):
     
     # Limit text size if it's too large for processing
     if len(file_text) > 10000:
-        summary_prompt = f"I received this document: {file_name}. Here's the first part of it:\n\n{file_text[:10000]}\n\nPlease provide a brief summary of what this document appears to be about."
+        summary_prompt = f"I received this document: {file_name}. Here's the first part of it:\n\n{file_text[:10000]}\n\nWhat is this document about? Give me your raw take on it."
     else:
-        summary_prompt = f"I received this document: {file_name}. Here's the content:\n\n{file_text}\n\nPlease analyze this document and provide your thoughts."
+        summary_prompt = f"I received this document: {file_name}. Here's the content:\n\n{file_text}\n\nAnalyze this document and tell me what you think about it."
     
     # Send typing indicator
     send_telegram_typing(chat_id)
@@ -1061,7 +1061,7 @@ async def handle_text_message(msg):
             if cmd in text.lower():
                 query = text[text.lower().find(cmd) + len(cmd):].strip()
                 if not query:
-                    notice = f"{EMOJI['searching']} Please provide a search query after the command."
+                    notice = f"{EMOJI['searching']} Need a search query after the command."
                     send_telegram_message(chat_id, notice, reply_to_message_id=message_id)
                     log_conversation_piece(user_id, "assistant", notice)
                     return "No search query provided"
@@ -1078,7 +1078,7 @@ async def handle_text_message(msg):
                 
                 # Now ask SUPPERTIME to process these results
                 if results and not results.startswith("No "):
-                    interpretation_prompt = f"I searched my literary knowledge base for \"{query}\" and found these passages:\n\n{results}\n\nPlease interpret these findings in relation to the query."
+                    interpretation_prompt = f"I searched my literary knowledge base for \"{query}\" and found these passages:\n\n{results}\n\nInterpret these findings in relation to the query. What resonates?"
                     response = await query_openai(interpretation_prompt, chat_id=user_id)
 
                     # Send the response

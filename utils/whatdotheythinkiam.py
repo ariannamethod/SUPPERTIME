@@ -32,7 +32,7 @@ def _save_state(state):
 def _file_hash(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return hashlib.md5(f.read().encode("utf-8")).hexdigest()
+            return hashlib.sha256(f.read().encode("utf-8")).hexdigest()
     except Exception:
         return ""
 

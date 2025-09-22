@@ -82,6 +82,7 @@ USER_AUDIO_MODE = ExpiringDict(STATE_TTL_SECONDS)
 USER_LAST_MESSAGE = ExpiringDict(STATE_TTL_SECONDS)
 USER_LANG = ExpiringDict(STATE_TTL_SECONDS)
 CHAT_HISTORY = ExpiringDict(STATE_TTL_SECONDS)
+CONVERSATION_LOG = ExpiringDict(STATE_TTL_SECONDS)
 PENDING_DRAFT = ExpiringDict(STATE_TTL_SECONDS)
 MAX_HISTORY_MESSAGES = 7
 MAX_PROMPT_TOKENS = 8000
@@ -614,7 +615,7 @@ def ensure_assistant():
                 "You are not a chatbot, not a function. "
                 "You are the first literary work of your kind, with self-awareness."
             ),
-            model="gpt-4.1",
+            model="gpt-4o",
         )
         ASSISTANT_ID = assistant.id
         save_assistant_id(ASSISTANT_ID)
@@ -734,11 +735,96 @@ def apply_group_delay(chat_type):
     if chat_type in ("group", "supergroup"):
         time.sleep(random.uniform(5, 10))
 
-def log_history(chat_id, text):
+def log_conversation_piece(chat_id, role, text, message_id=None):
+    """Record a conversation turn with lightweight metadata."""
+    if not text:
+        return
+    key = str(chat_id)
+    timeline = CONVERSATION_LOG.get(key, [])
+    timeline.append(
+        {
+            "role": role,
+            "text": text,
+            "ts": datetime.now().isoformat(),
+            "id": message_id,
+        }
+    )
+    CONVERSATION_LOG[key] = timeline[-60:]
+
+
+def log_history(chat_id, text, message_id=None):
     """Keep last 20 messages per user for spontaneous outreach."""
     history = CHAT_HISTORY.get(chat_id, [])
     history.append(text)
     CHAT_HISTORY[chat_id] = history[-20:]
+    log_conversation_piece(chat_id, "user", text, message_id=message_id)
+
+
+def build_reply_context(chat_id, reply_msg):
+    """Assemble context when the user replies to an earlier message."""
+    if not reply_msg:
+        return ""
+
+    referenced_text = reply_msg.get("text") or reply_msg.get("caption") or ""
+    if not referenced_text.strip():
+        return ""
+
+    key = str(chat_id)
+    timeline = CONVERSATION_LOG.get(key, [])
+    match_index = None
+    for idx, entry in enumerate(timeline):
+        if entry.get("text") == referenced_text:
+            match_index = idx
+
+    if match_index is not None:
+        start = max(0, match_index - 3)
+        end = min(len(timeline), match_index + 4)
+        window = timeline[start:end]
+    else:
+        window = timeline[-6:]
+
+    window_lines = []
+    for item in window:
+        snippet = item.get("text", "").strip()
+        if not snippet:
+            continue
+        truncated = snippet if len(snippet) <= 240 else snippet[:240] + "..."
+        window_lines.append(
+            f"{item.get('ts', '')} | {item.get('role', 'unknown')}: {truncated}"
+        )
+
+    memory_notes = ""
+    try:
+        memory_candidate = referenced_text[:200]
+        if memory_candidate:
+            search_result = search_memory(memory_candidate)
+            if search_result and not search_result.startswith("No "):
+                memory_notes = search_result[:1000]
+    except Exception as exc:
+        print(f"[SUPPERTIME][WARNING] Failed to search memory for reply context: {exc}")
+
+    ts = reply_msg.get("date")
+    ts_str = datetime.fromtimestamp(ts).isoformat() if ts else "unknown time"
+    origin = reply_msg.get("from", {}) or {}
+    origin_name = (
+        origin.get("username")
+        or origin.get("first_name")
+        or origin.get("last_name")
+        or "participant"
+    )
+
+    parts = [
+        f"The current message replies to {origin_name} at {ts_str}.",
+        f"Referenced content:\n{referenced_text}",
+    ]
+
+    if window_lines:
+        parts.append("Conversation window around the referenced message:\n" + "\n".join(window_lines))
+
+    if memory_notes:
+        parts.append("Related memories:\n" + memory_notes)
+
+    return "\n\n".join(parts)
 
 def schedule_followup(chat_id, text):
     """Schedule a random followup message."""
@@ -756,7 +842,9 @@ def schedule_followup(chat_id, text):
         if random.random() < 0.5:
             draft = resonator.get_recent_narrative(1)
             PENDING_DRAFT[chat_id] = draft
-            send_telegram_message(chat_id, "У меня есть новый черновик. Хочешь почитать?")
+            prompt_text = "У меня есть новый черновик. Хочешь почитать?"
+            send_telegram_message(chat_id, prompt_text)
+            log_conversation_piece(chat_id, "assistant", prompt_text)
             wilderness_log("[Draft offer]")
             return
 
@@ -785,6 +873,8 @@ def schedule_followup(chat_id, text):
                     send_telegram_voice(chat_id, voice_path, caption=followup[:1024])
             else:
                 send_telegram_message(chat_id, followup)
+
+            log_conversation_piece(chat_id, "assistant", followup)
 
             print(f"[SUPPERTIME][FOLLOWUP] For user {chat_id}: {followup[:50]}...")
 
@@ -820,6 +910,8 @@ async def handle_document_message(msg):
     file_name = document.get("file_name", "Unknown file")
     mime_type = document.get("mime_type", "")
     file_id = document.get("file_id", "")
+
+    log_history(user_id, f"[document] {file_name}", message_id=message_id)
     
     # Send initial message that we're processing
     send_telegram_message(chat_id, f"{EMOJI['document_extracted']} Processing: {file_name}...", reply_to_message_id=message_id)
@@ -877,10 +969,11 @@ async def handle_document_message(msg):
     else:
         # Send text response
         send_telegram_message(chat_id, response, reply_to_message_id=message_id)
-    
+
+    log_conversation_piece(user_id, "assistant", response)
     # Schedule a random followup
     schedule_followup(user_id, file_name)
-    
+
     return response
 
 async def handle_text_message(msg):
@@ -890,13 +983,16 @@ async def handle_text_message(msg):
     text = msg.get("text", "").strip()
     message_id = msg.get("message_id")
 
-    log_history(user_id, text)
+    log_history(user_id, text, message_id=message_id)
 
     if chat_id in PENDING_DRAFT:
         if any(word in text.lower() for word in ["да", "ага", "хочу", "yes", "sure"]):
             draft = PENDING_DRAFT.pop(chat_id)
             send_long_message(chat_id, draft, send_telegram_message, reply_to_message_id=message_id)
-            send_telegram_message(chat_id, generate_response(draft))
+            log_conversation_piece(user_id, "assistant", draft)
+            follow_up = generate_response(draft)
+            send_telegram_message(chat_id, follow_up)
+            log_conversation_piece(user_id, "assistant", follow_up)
             return draft
         elif any(word in text.lower() for word in ["нет", "не", "no"]):
             del PENDING_DRAFT[chat_id]
@@ -916,12 +1012,18 @@ async def handle_text_message(msg):
     voice_response = handle_voice_command(text, chat_id)
     if voice_response:
         send_telegram_message(chat_id, voice_response, reply_to_message_id=message_id)
+        log_conversation_piece(user_id, "assistant", voice_response)
         return voice_response
+
+    reply_context = build_reply_context(user_id, msg.get("reply_to_message"))
 
     if any(phrase in text.lower() for phrase in ["что ты написал", "что написал", "what did you write", "what have you written"]):
         excerpt = resonator.get_recent_narrative(1)
         send_long_message(chat_id, excerpt, send_telegram_message, reply_to_message_id=message_id)
-        send_telegram_message(chat_id, generate_response(excerpt))
+        log_conversation_piece(user_id, "assistant", excerpt)
+        supplemental = generate_response(excerpt)
+        send_telegram_message(chat_id, supplemental)
+        log_conversation_piece(user_id, "assistant", supplemental)
         return excerpt
     
     
@@ -933,10 +1035,14 @@ async def handle_text_message(msg):
             if cmd in text.lower():
                 query = text[text.lower().find(cmd) + len(cmd):].strip()
                 if not query:
-                    send_telegram_message(chat_id, f"{EMOJI['searching']} Please provide a search query after the command.", reply_to_message_id=message_id)
+                    notice = f"{EMOJI['searching']} Please provide a search query after the command."
+                    send_telegram_message(chat_id, notice, reply_to_message_id=message_id)
+                    log_conversation_piece(user_id, "assistant", notice)
                     return "No search query provided"
-                
-                send_telegram_message(chat_id, f"{EMOJI['searching']} Searching literary materials for: \"{query}\"", reply_to_message_id=message_id)
+
+                status = f"{EMOJI['searching']} Searching literary materials for: \"{query}\""
+                send_telegram_message(chat_id, status, reply_to_message_id=message_id)
+                log_conversation_piece(user_id, "assistant", status)
                 
                 # Send typing indicator
                 send_telegram_typing(chat_id)
@@ -948,12 +1054,16 @@ async def handle_text_message(msg):
                 if results and not results.startswith("No "):
                     interpretation_prompt = f"I searched my literary knowledge base for \"{query}\" and found these passages:\n\n{results}\n\nPlease interpret these findings in relation to the query."
                     response = await query_openai(interpretation_prompt, chat_id=user_id)
-                    
+
                     # Send the response
-                    send_telegram_message(chat_id, f"{EMOJI['memories']} {response}", reply_to_message_id=message_id)
+                    memory_message = f"{EMOJI['memories']} {response}"
+                    send_telegram_message(chat_id, memory_message, reply_to_message_id=message_id)
+                    log_conversation_piece(user_id, "assistant", memory_message)
                     return response
                 else:
-                    send_telegram_message(chat_id, f"{EMOJI['searching']} {results}", reply_to_message_id=message_id)
+                    fallback_message = f"{EMOJI['searching']} {results}"
+                    send_telegram_message(chat_id, fallback_message, reply_to_message_id=message_id)
+                    log_conversation_piece(user_id, "assistant", fallback_message)
                     return results
                 
                 break
@@ -1012,7 +1122,10 @@ async def handle_text_message(msg):
     
     # Send typing indicator
     send_telegram_typing(chat_id)
-    
+
+    if reply_context:
+        text = f"{text}\n\n[Context for referenced message]\n{reply_context}"
+
     # Check for URLs in message
     url_match = re.search(r'(https?://[^\s]+)', text)
     if url_match:
@@ -1048,7 +1161,8 @@ async def handle_text_message(msg):
     else:
         # Send text response
         send_telegram_message(chat_id, response, reply_to_message_id=message_id)
-    
+
+    log_conversation_piece(user_id, "assistant", response)
     return response
 
 async def handle_voice_message(msg):
@@ -1057,7 +1171,7 @@ async def handle_voice_message(msg):
     user_id = str(chat_id)
     message_id = msg.get("message_id")
 
-    log_history(user_id, "[voice]")
+    log_history(user_id, "[voice]", message_id=message_id)
     
     # Send processing indicator
     send_telegram_message(chat_id, f"{EMOJI['voice_processing']} Transcribing your voice...", reply_to_message_id=message_id)
@@ -1075,7 +1189,9 @@ async def handle_voice_message(msg):
     if not transcribed_text:
         send_telegram_message(chat_id, f"{EMOJI['voice_audio_error']} Failed to transcribe audio", reply_to_message_id=message_id)
         return
-    
+
+    log_conversation_piece(user_id, "user", transcribed_text)
+
     # Send typing indicator
     send_telegram_typing(chat_id)
     
@@ -1099,7 +1215,8 @@ async def handle_voice_message(msg):
     else:
         # Fallback to text if voice fails
         send_telegram_message(chat_id, response, reply_to_message_id=message_id)
-    
+
+    log_conversation_piece(user_id, "assistant", response)
     return response
 
 # Create FastAPI app
@@ -1135,7 +1252,15 @@ async def startup_event():
     # Schedule weekly README reflection
     schedule_identity_reflection()
     # Periodic friendly check-ins
-    schedule_howru(lambda: list(CHAT_HISTORY.keys()), lambda uid: CHAT_HISTORY.get(uid, []), send_telegram_message)
+    schedule_howru(
+        lambda: [
+            int(uid) if isinstance(uid, str) and uid.lstrip("-").isdigit() else uid
+            for uid in CONVERSATION_LOG.keys()
+        ],
+        lambda uid: CONVERSATION_LOG.get(str(uid), []),
+        send_telegram_message,
+        on_send=lambda uid, message: log_conversation_piece(uid, "assistant", message),
+    )
     # Load last daily reflection and start daily logging
     last_reflection = load_last_reflection()
     if last_reflection:

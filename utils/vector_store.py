@@ -96,7 +96,7 @@ def vectorize_file(fname, openai_api_key):
     with open(fname, "r", encoding="utf-8") as f:
         text = f.read()
     chunks = chunk_text(text)
-    file_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+    file_hash = hashlib.sha256(text.encode('utf-8')).hexdigest()
     ids = []
     for idx, chunk in enumerate(chunks):
         meta_id = f"{fname}:{idx}"
@@ -119,7 +119,7 @@ def semantic_search_in_file(fname, query, openai_api_key, top_k=5):
             print(f"Failed to connect to Pinecone: {exc}")
             return []
     emb = safe_embed(query, openai_api_key)
-    file_hash = hashlib.md5(open(fname, encoding='utf-8').read().encode('utf-8')).hexdigest()
+    file_hash = hashlib.sha256(open(fname, encoding='utf-8').read().encode('utf-8')).hexdigest()
     # Search only by id of this file
     # Pinecone can't filter by id, but can by metadata
     try:

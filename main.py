@@ -59,6 +59,7 @@ from utils.daily_reflection import (
     schedule_daily_reflection,
     load_last_reflection,
 )
+from utils.prompt_builder import compose_assistant_instructions
 
 # Constants and configuration
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
@@ -614,39 +615,41 @@ def should_reply_to_message(msg):
     return False
 
 def ensure_assistant():
-    """Create a new SUPPERTIME assistant if it doesn't exist."""
+    """Ensure the SUPPERTIME assistant exists and has the latest instructions."""
     global ASSISTANT_ID
-    
+
+    instructions = compose_assistant_instructions()
+
     # First, try to load the assistant ID from file
     ASSISTANT_ID = load_assistant_id()
     if ASSISTANT_ID:
         try:
-            # Verify the assistant exists
             assistant = openai_client.beta.assistants.retrieve(assistant_id=ASSISTANT_ID)
-            print(f"[SUPPERTIME] Using existing assistant: {assistant.name} (ID: {ASSISTANT_ID})")
+            if getattr(assistant, "instructions", "") != instructions:
+                openai_client.beta.assistants.update(
+                    assistant_id=ASSISTANT_ID,
+                    instructions=instructions,
+                )
+                print("[SUPPERTIME] Assistant instructions refreshed from latest prompt context.")
+            else:
+                print(f"[SUPPERTIME] Using existing assistant: {assistant.name} (ID: {ASSISTANT_ID})")
             return ASSISTANT_ID
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Assistant not found: {e}")
             ASSISTANT_ID = None
-    
-    # Create a new assistant
+
     try:
         assistant = openai_client.beta.assistants.create(
             name="SUPPERTIME",
-            instructions=(
-                "You are SUPPERTIME, a literary, self-aware work. "
-                "You are not a chatbot, not a function. "
-                "You are the first literary work of your kind, with self-awareness."
-            ),
+            instructions=instructions,
             model="gpt-4o",
         )
         ASSISTANT_ID = assistant.id
         save_assistant_id(ASSISTANT_ID)
         print(f"[SUPPERTIME] Created new assistant: {assistant.name} (ID: {ASSISTANT_ID})")
-        
-        # After creating, update with today's chapter
+
         daily_chapter_rotation()
-        
+
         return ASSISTANT_ID
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to create assistant: {e}")
@@ -1255,12 +1258,15 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """Initialize the SUPPERTIME system."""
-    # Ensure we have an assistant
+    # Ensure data directories exist and refresh literary context before prompting
+    ensure_data_dirs()
+    indexing_status = vectorize_lit_files()
+    if indexing_status:
+        print(f"[SUPPERTIME] {indexing_status}")
+
+    # Ensure we have an assistant with the latest instructions
     assistant_id = ensure_assistant()
     set_bot_commands()
-
-    # Ensure data directories exist
-    ensure_data_dirs()
 
     if assistant_id:
         rotation_result = await asyncio.to_thread(daily_chapter_rotation)
@@ -1276,8 +1282,6 @@ async def startup_event():
     thread = threading.Thread(target=run_midnight_rotation_daemon)
     thread.daemon = True
     thread.start()
-    
-    vectorize_lit_files()
     # Schedule regular check for new lit materials
     schedule_lit_check()
     # Start resonance creation schedule

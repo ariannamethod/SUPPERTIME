@@ -1,9 +1,8 @@
-import datetime
-import json
 import os
+import json
+import datetime
 import threading
 import time
-
 from utils.vector_store import add_memory_entry
 from utils.journal import log_event
 

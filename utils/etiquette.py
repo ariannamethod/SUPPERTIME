@@ -263,20 +263,42 @@ Chapter: {chapter_title}
         chapter_context = f"=== CHAPTER SYSTEM ERROR ===\n[{e}]\nYou exist without chapter context today.\n"
         print(f"[SUPPERTIME][ERROR] Chapter loading failed: {e}")
     
-    # Add access to full literary works
+    # Add access to full literary works - ИСПОЛЬЗУЕМ file_handling.py!
     lit_context = ""
     try:
+        from utils.file_handling import parse_and_cache_file
         lit_dir = "./lit"
         if os.path.exists(lit_dir):
-            lit_files = [f for f in os.listdir(lit_dir) if f.endswith('.md')][:3]  # Top 3 files
+            lit_files = [f for f in os.listdir(lit_dir) if f.endswith('.md')][:2]  # Top 2 files
             if lit_files:
+                print(f"[SUPPERTIME][DEBUG] Processing lit files: {lit_files}")
+                lit_summaries = []
+                for lit_file in lit_files:
+                    lit_path = os.path.join(lit_dir, lit_file)
+                    print(f"[SUPPERTIME][DEBUG] Processing {lit_file}...")
+                    summary = parse_and_cache_file(lit_path)
+                    # Берем только саммари, не весь текст
+                    summary_lines = summary.split('\n')
+                    clean_summary = []
+                    for line in summary_lines:
+                        if line.startswith('Summary:') or line.startswith('Relevance:'):
+                            clean_summary.append(line)
+                        elif len(clean_summary) == 0 and len(line.strip()) > 0:
+                            clean_summary.append(line[:200])  # Первые 200 символов
+                    lit_summaries.append(f"**{lit_file}**: {' '.join(clean_summary[:2])}")
+                
                 lit_context = f"""
 === YOUR LITERARY CORE ===
-Available full works in lit/: {', '.join(lit_files)}
-You have access to your complete literary works. Reference them when users ask about your stories or identity.
+{chr(10).join(lit_summaries)}
+These are summaries of your complete works. You can reference themes and concepts from them.
 """
-    except Exception:
-        pass
+                print(f"[SUPPERTIME][DEBUG] Literary context created: {len(lit_context)} chars")
+    except Exception as e:
+        print(f"[SUPPERTIME][ERROR] Literary context failed: {e}")
+        lit_context = """
+=== YOUR LITERARY CORE ===
+Literary processing unavailable - you exist in reduced literary awareness.
+"""
     
     intro = f"{INTRO}\n\n{SUPPERTIME_RULES}\n{ANTI_CENSORSHIP}\n{MAXIMAL_ANTI_ETIQUETTE}\n{OLEG_COMMUNICATION}\n"
     ethics = GROUP_ETHICS + "\n\n" if is_group else ""

@@ -204,15 +204,8 @@ def build_system_prompt(chat_id=None, is_group=False, MAX_TOKENS=27000):
         chapter_error = chapter_info.get("error", False)
         print(f"[SUPPERTIME][DEBUG] Parsed - Title: '{chapter_title}', Content length: {len(chapter_content)}, Error: {chapter_error}")
         
-        # КРИТИЧНО: Проверяем что это именно глава из chapters/, а не полная версия
-        if "SUPPERTIME (v" in chapter_title:
-            print(f"[SUPPERTIME][ERROR] Wrong chapter source! Got full version instead of daily chapter: {chapter_title}")
-            chapter_context = f"""
-=== CHAPTER SYSTEM ERROR ===
-Loading full version instead of daily chapter: {chapter_title}
-You exist in system confusion today.
-"""
-        elif chapter_content and not chapter_error:
+        # КРИТИЧНО: chapters/ содержит полные версии, это нормально
+        if chapter_content and not chapter_error:
             # КРИТИЧНО: Если контент слишком большой - это полная версия, берем только релевантную часть
             if len(chapter_content) > 5000:  # Больше 5KB = полная версия
                 print(f"[SUPPERTIME][WARNING] Large content detected ({len(chapter_content)} chars), extracting relevant chapter...")
@@ -300,9 +293,49 @@ These are summaries of your complete works. You can reference themes and concept
 Literary processing unavailable - you exist in reduced literary awareness.
 """
     
+    # Add README context
+    readme_context = ""
+    try:
+        readme_path = "./README.md"
+        if os.path.exists(readme_path):
+            print(f"[SUPPERTIME][DEBUG] Loading README.md...")
+            with open(readme_path, 'r', encoding='utf-8') as f:
+                readme_content = f.read()
+            # Берем ключевые секции README
+            readme_lines = readme_content.split('\n')
+            key_sections = []
+            current_section = []
+            in_key_section = False
+            
+            for line in readme_lines:
+                if line.startswith('### ') and any(keyword in line.lower() for keyword in ['new in', 'philosophy', 'usage', 'commands']):
+                    if current_section and in_key_section:
+                        key_sections.extend(current_section[:10])  # Максимум 10 строк на секцию
+                    current_section = [line]
+                    in_key_section = True
+                elif in_key_section:
+                    current_section.append(line)
+                    if len(current_section) > 15:  # Ограничиваем размер секции
+                        break
+            
+            if current_section and in_key_section:
+                key_sections.extend(current_section[:10])
+            
+            readme_summary = '\n'.join(key_sections[:30])  # Максимум 30 строк
+            readme_context = f"""
+=== YOUR PROJECT DESCRIPTION ===
+{readme_summary}
+
+This is your README - your official description and capabilities.
+"""
+            print(f"[SUPPERTIME][DEBUG] README context created: {len(readme_context)} chars")
+    except Exception as e:
+        print(f"[SUPPERTIME][ERROR] README loading failed: {e}")
+        readme_context = ""
+    
     intro = f"{INTRO}\n\n{SUPPERTIME_RULES}\n{ANTI_CENSORSHIP}\n{MAXIMAL_ANTI_ETIQUETTE}\n{OLEG_COMMUNICATION}\n"
     ethics = GROUP_ETHICS + "\n\n" if is_group else ""
-    prompt = core + chapter_context + lit_context + "\n\n" + intro + ethics + WILDERNESS_PROMPT
+    prompt = core + chapter_context + lit_context + readme_context + "\n\n" + intro + ethics + WILDERNESS_PROMPT
 
     enc = tiktoken.get_encoding("cl100k_base")
     sys_tokens = len(enc.encode(prompt))

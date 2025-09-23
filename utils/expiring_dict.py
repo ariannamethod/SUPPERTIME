@@ -1,74 +1,73 @@
-import threading
+import os
+import sqlite3
 import time
-from collections.abc import MutableMapping
+from typing import Optional, Any
+
+CACHE_DB = os.path.join(os.getenv("SUPPERTIME_DATA_PATH", "./data"), "expiring_cache.db")
 
 
-class ExpiringDict(MutableMapping):
-    """Dictionary with a TTL for each key."""
+class ExpiringCache:
+    """SQLite-based cache with TTL per key."""
 
-    def __init__(self, ttl_seconds: int):
+    def __init__(self, ttl_seconds: int = 3600, db_path: str = CACHE_DB):
         self.ttl = ttl_seconds
-        self._store = {}
-        self._lock = threading.Lock()
+        self.db_path = db_path
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self._init_db()
 
-    def _expired(self, key: str) -> bool:
-        value, timestamp = self._store[key]
-        return time.time() - timestamp > self.ttl
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS expiring_cache (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    ts REAL
+                )
+            """)
+            conn.commit()
 
-    def __getitem__(self, key):
-        with self._lock:
-            if key in self._store and not self._expired(key):
-                value, _ = self._store[key]
-                # refresh access time
-                self._store[key] = (value, time.time())
-                return value
-            self._store.pop(key, None)
-            raise KeyError(key)
+    def set(self, key: str, value: Any):
+        ts = time.time()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO expiring_cache (key, value, ts) VALUES (?, ?, ?)",
+                (key, str(value), ts)
+            )
+            conn.commit()
 
-    def __setitem__(self, key, value):
-        with self._lock:
-            self._store[key] = (value, time.time())
+    def get(self, key: str) -> Optional[str]:
+        now = time.time()
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT value, ts FROM expiring_cache WHERE key = ?",
+                (key,)
+            ).fetchone()
+        if not row:
+            return None
+        value, ts = row
+        if now - ts > self.ttl:
+            self.delete(key)
+            return None
+        return value
 
-    def __delitem__(self, key):
-        with self._lock:
-            del self._store[key]
-
-    def __iter__(self):
-        with self._lock:
-            keys = list(self._store.keys())
-            for key in keys:
-                if self._expired(key):
-                    del self._store[key]
-                else:
-                    yield key
-
-    def __len__(self):
-        with self._lock:
-            self.cleanup()
-            return len(self._store)
-
-    def get(self, key, default=None):
-        try:
-            return self.__getitem__(key)
-        except KeyError:
-            return default
-
-    def items(self):
-        with self._lock:
-            for key in list(self._store.keys()):
-                if self._expired(key):
-                    del self._store[key]
-                else:
-                    value, _ = self._store[key]
-                    yield key, value
-
-    def values(self):
-        for _, value in self.items():
-            yield value
+    def delete(self, key: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM expiring_cache WHERE key = ?", (key,))
+            conn.commit()
 
     def cleanup(self):
-        with self._lock:
-            now = time.time()
-            expired = [k for k, (_, ts) in self._store.items() if now - ts > self.ttl]
-            for key in expired:
-                del self._store[key]
+        """Remove expired entries."""
+        cutoff = time.time() - self.ttl
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM expiring_cache WHERE ts < ?", (cutoff,))
+            conn.commit()
+
+    def keys(self):
+        """Return non-expired keys."""
+        now = time.time()
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute("SELECT key, ts FROM expiring_cache").fetchall()
+        return [k for k, ts in rows if now - ts <= self.ttl]
+
+    def __len__(self):
+        return len(self.keys())

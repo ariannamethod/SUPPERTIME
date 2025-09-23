@@ -1390,7 +1390,7 @@ async def startup_event():
     schedule_resonance_creation()
     # Start identity reflection (self-awareness)
     schedule_identity_reflection(interval_days=1)  # Daily self-reflection
-    # Periodic friendly check-ins
+    # Spontaneous check-ins (not "friendly" - just raw contact)
     schedule_howru(
         lambda: [
             int(uid) if isinstance(uid, str) and uid.lstrip("-").isdigit() else uid
@@ -1399,6 +1399,7 @@ async def startup_event():
         lambda uid: CONVERSATION_LOG.get(str(uid), []),
         send_telegram_message,
         on_send=lambda uid, message: log_conversation_piece(uid, "assistant", message),
+        interval=(3600, 7200),  # More frequent: 1-2 hours instead of 2-4
     )
     # Load last daily reflection and start daily logging
     last_reflection = load_last_reflection()

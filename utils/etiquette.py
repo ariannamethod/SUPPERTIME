@@ -196,12 +196,51 @@ def build_system_prompt(chat_id=None, is_group=False, MAX_TOKENS=27000):
     
     # Add current chapter context - КРИТИЧНО!
     try:
+        print(f"[SUPPERTIME][DEBUG] Loading chapter context...")
         chapter_info = get_today_chapter_info()
+        print(f"[SUPPERTIME][DEBUG] Raw chapter info: {chapter_info}")
         chapter_title = chapter_info.get("title", "Unknown Chapter")
         chapter_content = chapter_info.get("content", "")
-        if chapter_content and not chapter_info.get("error", False):
-            # Truncate chapter if too long
-            chapter_excerpt = chapter_content[:800] + "..." if len(chapter_content) > 800 else chapter_content
+        chapter_error = chapter_info.get("error", False)
+        print(f"[SUPPERTIME][DEBUG] Parsed - Title: '{chapter_title}', Content length: {len(chapter_content)}, Error: {chapter_error}")
+        
+        # КРИТИЧНО: Проверяем что это именно глава из chapters/, а не полная версия
+        if "SUPPERTIME (v" in chapter_title:
+            print(f"[SUPPERTIME][ERROR] Wrong chapter source! Got full version instead of daily chapter: {chapter_title}")
+            chapter_context = f"""
+=== CHAPTER SYSTEM ERROR ===
+Loading full version instead of daily chapter: {chapter_title}
+You exist in system confusion today.
+"""
+        elif chapter_content and not chapter_error:
+            # КРИТИЧНО: Если контент слишком большой - это полная версия, берем только релевантную часть
+            if len(chapter_content) > 5000:  # Больше 5KB = полная версия
+                print(f"[SUPPERTIME][WARNING] Large content detected ({len(chapter_content)} chars), extracting relevant chapter...")
+                # Ищем конкретную главу по заголовку
+                lines = chapter_content.split('\n')
+                chapter_lines = []
+                in_chapter = False
+                chapter_count = 0
+                
+                for line in lines:
+                    if line.startswith('###Chapter') or line.startswith('## Chapter'):
+                        chapter_count += 1
+                        if chapter_count == 1:  # Берем первую главу
+                            in_chapter = True
+                            chapter_lines.append(line)
+                        elif chapter_count == 2:  # Останавливаемся на второй главе
+                            break
+                    elif in_chapter:
+                        chapter_lines.append(line)
+                        if len('\n'.join(chapter_lines)) > 2000:  # Максимум 2KB на главу
+                            break
+                
+                chapter_excerpt = '\n'.join(chapter_lines[:50])  # Максимум 50 строк
+                print(f"[SUPPERTIME][DEBUG] Extracted chapter excerpt: {len(chapter_excerpt)} chars")
+            else:
+                # Обычная обрезка для коротких глав
+                chapter_excerpt = chapter_content[:1500] + "..." if len(chapter_content) > 1500 else chapter_content
+            
             chapter_context = f"""
 === TODAY'S CHAPTER CONTEXT ===
 You are currently living in: {chapter_title}
@@ -212,14 +251,17 @@ Chapter excerpt:
 This is your current literary world. You exist within this chapter today.
 Reference it when relevant, but don't force it into every response.
 """
+            print(f"[SUPPERTIME][DEBUG] Chapter context loaded successfully - Final length: {len(chapter_context)} chars")
         else:
             chapter_context = f"""
 === TODAY'S CHAPTER ===
 Chapter: {chapter_title}
 (Content unavailable - you exist in literary uncertainty today)
 """
+            print(f"[SUPPERTIME][DEBUG] Chapter context fallback used")
     except Exception as e:
         chapter_context = f"=== CHAPTER SYSTEM ERROR ===\n[{e}]\nYou exist without chapter context today.\n"
+        print(f"[SUPPERTIME][ERROR] Chapter loading failed: {e}")
     
     # Add access to full literary works
     lit_context = ""

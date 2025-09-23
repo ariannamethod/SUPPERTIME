@@ -20,25 +20,19 @@ import time
 import json
 import random
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
+from pathlib import Path
 import re
 import requests
 import tempfile
 import asyncio
-import glob
 import base64
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydub import AudioSegment
 from utils.expiring_dict import ExpiringDict
-
-# Import our new chapter rotation system
-from utils.assistants_chapter_loader import (
-    daily_chapter_rotation,
-    run_midnight_rotation_daemon,
-    get_today_chapter_info,
-)
+from utils.behavior import inject_behavior
 from utils.etiquette import generate_response, build_system_prompt
 from utils.journal import wilderness_log
 from utils.tools import split_for_telegram, send_long_message
@@ -49,16 +43,21 @@ from utils.config import (
     vectorize_lit_files,
     search_memory,
     explore_lit_directory,
-    schedule_lit_check,
-    schedule_identity_reflection,
 )
 from utils.resonator import schedule_resonance_creation, create_resonance_now
 import utils.resonator as resonator
 from utils.howru import schedule_howru
-from utils.daily_reflection import (
-    schedule_daily_reflection,
-    load_last_reflection,
+from utils.daily_reflection import load_last_reflection
+from utils.sqlite_state import (
+    get_openai_cache,
+    get_thread,
+    get_user_state,
+    init_state_db,
+    set_openai_cache,
+    set_thread,
+    set_user_state,
 )
+from utils.lit_monitor import LitMonitor
 
 # Constants and configuration
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
@@ -73,6 +72,7 @@ ASSISTANT_ID_PATH = os.path.join(SUPPERTIME_DATA_PATH, "assistant_id.txt")
 ASSISTANT_ID = None
 CACHE_PATH = os.path.join(SUPPERTIME_DATA_PATH, "openai_cache.json")
 OPENAI_CACHE = {}
+STATE_DB_PATH = os.path.join(SUPPERTIME_DATA_PATH, "suppertime.db")
 
 # User settings
 STATE_TTL_SECONDS = int(os.getenv("STATE_TTL_SECONDS", 24 * 60 * 60))
@@ -192,6 +192,98 @@ def save_cache():
         pass
 
 
+MISSING = object()
+
+
+def _user_key(user_id):
+    return str(user_id)
+
+
+def get_voice_mode(user_id):
+    if user_id is None:
+        return False
+    value = USER_VOICE_MODE.get(user_id, MISSING)
+    if value is MISSING:
+        state = get_user_state(_user_key(user_id))
+        if state and state.get("voice_mode") is not None:
+            value = bool(state.get("voice_mode"))
+            USER_VOICE_MODE[user_id] = value
+        else:
+            value = False
+    return bool(value)
+
+
+def set_voice_mode(user_id, enabled):
+    if user_id is None:
+        return
+    USER_VOICE_MODE[user_id] = bool(enabled)
+    set_user_state(_user_key(user_id), voice_mode=1 if enabled else 0)
+
+
+def get_audio_mode(user_id):
+    if user_id is None:
+        return False
+    value = USER_AUDIO_MODE.get(user_id, MISSING)
+    if value is MISSING:
+        state = get_user_state(_user_key(user_id))
+        if state and state.get("audio_mode") is not None:
+            value = bool(state.get("audio_mode"))
+            USER_AUDIO_MODE[user_id] = value
+        else:
+            value = False
+    return bool(value)
+
+
+def set_audio_mode(user_id, enabled):
+    if user_id is None:
+        return
+    USER_AUDIO_MODE[user_id] = bool(enabled)
+    set_user_state(_user_key(user_id), audio_mode=1 if enabled else 0)
+
+
+def get_user_language_pref(user_id):
+    if user_id is None:
+        return None
+    value = USER_LANG.get(user_id, MISSING)
+    if value is MISSING or not value:
+        state = get_user_state(_user_key(user_id))
+        if state and state.get("lang"):
+            value = state.get("lang")
+            USER_LANG[user_id] = value
+        elif value is MISSING:
+            value = None
+    return value
+
+
+def set_user_language_pref(user_id, lang):
+    if user_id is None:
+        return
+    if lang:
+        USER_LANG[user_id] = lang
+    set_user_state(_user_key(user_id), lang=lang)
+
+
+def get_thread_id_for_user(user_id):
+    if user_id is None:
+        return None
+    value = USER_THREAD_ID.get(user_id, MISSING)
+    if value is MISSING or not value:
+        stored = get_thread(_user_key(user_id))
+        if stored:
+            USER_THREAD_ID[user_id] = stored
+            return stored
+        if value is MISSING:
+            return None
+    return value
+
+
+def set_thread_id_for_user(user_id, thread_id):
+    if user_id is None:
+        return
+    USER_THREAD_ID[user_id] = thread_id
+    set_thread(_user_key(user_id), thread_id)
+
+
 def start_state_cleanup_thread():
     """Start a background thread to clear expired user state."""
     def cleanup_loop():
@@ -239,18 +331,26 @@ def save_assistant_id(assistant_id):
 
 def load_user_thread(user_id):
     """Load a user's thread ID from storage."""
+    stored = get_thread_id_for_user(user_id)
+    if stored:
+        return stored
+
     thread_path = os.path.join(THREAD_STORAGE_PATH, f"{user_id}.json")
     if os.path.exists(thread_path):
         try:
             with open(thread_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("thread_id")
+                thread_id = data.get("thread_id")
+                if thread_id:
+                    set_thread_id_for_user(user_id, thread_id)
+                return thread_id
         except Exception:
             pass
     return None
 
 def save_user_thread(user_id, thread_id):
     """Save a user's thread ID to storage."""
+    set_thread_id_for_user(user_id, thread_id)
     thread_path = os.path.join(THREAD_STORAGE_PATH, f"{user_id}.json")
     try:
         os.makedirs(os.path.dirname(thread_path), exist_ok=True)
@@ -647,9 +747,6 @@ def ensure_assistant():
         ASSISTANT_ID = assistant.id
         save_assistant_id(ASSISTANT_ID)
         print(f"[SUPPERTIME] Created new assistant: {assistant.name} (ID: {ASSISTANT_ID})")
-
-        daily_chapter_rotation()
-
         return ASSISTANT_ID
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to create assistant: {e}")
@@ -658,8 +755,11 @@ def ensure_assistant():
 async def query_openai(prompt, chat_id=None):
     """Send a query to OpenAI's Assistants API."""
     # Detect language
-    lang = USER_LANG.get(chat_id) or detect_lang(prompt)
-    USER_LANG[chat_id] = lang
+    lang = get_user_language_pref(chat_id)
+    if not lang:
+        lang = detect_lang(prompt)
+    if chat_id is not None:
+        set_user_language_pref(chat_id, lang)
 
     # First, ensure we have a valid assistant
     assistant_id = await asyncio.to_thread(ensure_assistant)
@@ -667,7 +767,7 @@ async def query_openai(prompt, chat_id=None):
         return "SUPPERTIME could not initialize. Try again later."
 
     # Get or create thread for this user
-    thread_id = USER_THREAD_ID.get(chat_id)
+    thread_id = get_thread_id_for_user(chat_id)
     if not thread_id:
         thread_id = load_user_thread(chat_id)
 
@@ -675,7 +775,7 @@ async def query_openai(prompt, chat_id=None):
         try:
             thread = await asyncio.to_thread(openai_client.beta.threads.create)
             thread_id = thread.id
-            USER_THREAD_ID[chat_id] = thread_id
+            set_thread_id_for_user(chat_id, thread_id)
             save_user_thread(chat_id, thread_id)
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Failed to create thread: {e}")
@@ -686,6 +786,10 @@ async def query_openai(prompt, chat_id=None):
     hash_key = hashlib.md5(cache_key.encode('utf-8')).hexdigest()
     if hash_key in OPENAI_CACHE:
         return OPENAI_CACHE[hash_key]
+    cached_value = get_openai_cache(hash_key)
+    if cached_value is not None:
+        OPENAI_CACHE[hash_key] = cached_value
+        return cached_value
 
     try:
         # Add language directive to the message
@@ -734,6 +838,7 @@ async def query_openai(prompt, chat_id=None):
                 answer = message.content[0].text.value
                 # Cache the response
                 OPENAI_CACHE[hash_key] = answer
+                set_openai_cache(hash_key, answer)
                 save_cache()
                 return answer
         
@@ -891,7 +996,7 @@ def schedule_followup(chat_id, text):
         wilderness_log(followup)
 
         if chat_id:
-            use_voice = USER_VOICE_MODE.get(chat_id, False)
+            use_voice = get_voice_mode(chat_id)
 
             if use_voice:
                 voice_path = text_to_speech(followup)
@@ -912,11 +1017,11 @@ def handle_voice_command(text, chat_id):
     text_lower = text.lower()
     
     if "voice on" in text_lower or "/voiceon" in text_lower:
-        USER_VOICE_MODE[chat_id] = True
+        set_voice_mode(chat_id, True)
         return f"{EMOJI['voiceon']} Voice mode enabled. I'll speak to you now."
-    
+
     if "voice off" in text_lower or "/voiceoff" in text_lower:
-        USER_VOICE_MODE[chat_id] = False
+        set_voice_mode(chat_id, False)
         return f"{EMOJI['voiceoff']} Voice mode disabled. Text only."
         
     return None
@@ -982,7 +1087,7 @@ async def handle_document_message(msg):
     apply_group_delay(msg.get("chat", {}).get("type"))
 
     # Check if we should send voice
-    use_voice = USER_VOICE_MODE.get(chat_id, False)
+    use_voice = get_voice_mode(chat_id)
     
     if use_voice:
         # Convert to voice first
@@ -1174,7 +1279,7 @@ async def handle_text_message(msg):
     apply_group_delay(msg.get("chat", {}).get("type"))
 
     # Check if we should send voice
-    use_voice = USER_VOICE_MODE.get(chat_id, False)
+    use_voice = get_voice_mode(chat_id)
     
     if use_voice:
         # Convert to voice first
@@ -1260,6 +1365,8 @@ async def startup_event():
     """Initialize the SUPPERTIME system."""
     # Ensure data directories exist and refresh literary context before prompting
     ensure_data_dirs()
+    inject_behavior()
+    init_state_db(STATE_DB_PATH)
     indexing_status = vectorize_lit_files()
     if indexing_status:
         print(f"[SUPPERTIME] {indexing_status}")
@@ -1267,27 +1374,19 @@ async def startup_event():
     # Ensure we have an assistant with the latest instructions
     assistant_id = ensure_assistant()
     set_bot_commands()
-
-    if assistant_id:
-        rotation_result = await asyncio.to_thread(daily_chapter_rotation)
-        if not rotation_result.get("success", False):
-            print(
-                "[SUPPERTIME][ERROR] Immediate chapter rotation failed: "
-                f"{rotation_result.get('error', 'Unknown error')}"
-            )
-    else:
+    if not assistant_id:
         print("[SUPPERTIME][WARNING] Assistant unavailable; skipping initial chapter sync.")
 
-    # Start the midnight rotation daemon in a separate thread
-    thread = threading.Thread(target=run_midnight_rotation_daemon)
-    thread.daemon = True
-    thread.start()
-    # Schedule regular check for new lit materials
-    schedule_lit_check()
+    monitor = LitMonitor(
+        root_dir=Path(__file__).resolve().parent,
+        db_path=STATE_DB_PATH,
+        on_change=lambda: vectorize_lit_files(),
+    )
+    monitor.snapshot()
+    threading.Thread(target=monitor.run_loop, kwargs={"interval_sec": 2}, daemon=True).start()
+
     # Start resonance creation schedule
     schedule_resonance_creation()
-    # Schedule weekly README reflection
-    schedule_identity_reflection()
     # Periodic friendly check-ins
     schedule_howru(
         lambda: [
@@ -1302,11 +1401,7 @@ async def startup_event():
     last_reflection = load_last_reflection()
     if last_reflection:
         print(f"[SUPPERTIME] Last reflection: {last_reflection.get('text')}")
-    schedule_daily_reflection(
-        lambda: get_today_chapter_info().get('title', 'Unknown'),
-        lambda: f"messages: {sum(len(h) for h in CHAT_HISTORY.values())}"
-    )
-    
+
     print("[SUPPERTIME] System initialized successfully")
 
 @app.post("/webhook")

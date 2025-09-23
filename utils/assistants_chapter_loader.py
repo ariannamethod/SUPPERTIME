@@ -155,6 +155,37 @@ def get_today_chapter_info() -> Dict[str, Any]:
     return info
 
 
+def load_today_chapter(return_path: bool = False) -> str:
+    """Compatibility wrapper that returns today's chapter content or path.
+
+    Historically, other modules imported :func:`load_today_chapter` directly
+    from this module. The rotation refactor introduced
+    :func:`get_today_chapter_info` without preserving the legacy API, which
+    caused import failures in production environments. This helper restores the
+    original interface while delegating to the richer chapter metadata loader.
+
+    Args:
+        return_path: When ``True``, return the resolved filesystem path instead
+            of the chapter contents. Errors are returned as human-readable
+            strings regardless of the flag so callers receive context.
+
+    Returns:
+        The chapter contents or path for today, or an error string if the
+        chapter could not be loaded.
+    """
+
+    info = get_today_chapter_info()
+
+    if info.get("error"):
+        # Preserve compatibility by returning the descriptive error message.
+        return info.get("title") or "[Resonator] Chapter unavailable."
+
+    if return_path:
+        return info.get("path") or ""
+
+    return info.get("content", "")
+
+
 def _notify_chapter_selection(title: str):
     if TELEGRAM_API_URL and (SUPPERTIME_CHAT_ID or SUPPERTIME_GROUP_ID):
         data = {"chat_id": SUPPERTIME_CHAT_ID or SUPPERTIME_GROUP_ID, "text": f"Today's chapter: {title}"}

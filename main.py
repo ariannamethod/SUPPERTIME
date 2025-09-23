@@ -170,13 +170,8 @@ TRIGGERS = [
     "рефлексия", "пронзить_бесконечность", "усилить", "запутать", "капитулировать", "зеркальный_резонанс"
 ]
 
-# Load cache if exists
-if os.path.exists(CACHE_PATH):
-    try:
-        with open(CACHE_PATH, "r", encoding="utf-8") as f:
-            OPENAI_CACHE = json.load(f)
-    except Exception:
-        OPENAI_CACHE = {}
+# Legacy JSON cache - now using SQLite instead
+OPENAI_CACHE = {}  # Keep in memory for compatibility
 
 def ensure_data_dirs():
     """Ensure all necessary data directories exist."""
@@ -185,16 +180,9 @@ def ensure_data_dirs():
     os.makedirs(LIT_DIR, exist_ok=True)
 
 def save_cache():
-    """Save the OpenAI response cache to disk."""
-    try:
-        os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-        with open(CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(OPENAI_CACHE, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-MISSING = object()
+    """Legacy function - now using SQLite for caching."""
+    # Cache is now automatically saved to SQLite via set_openai_cache()
+    pass
 
 
 def _user_key(user_id):
@@ -204,8 +192,8 @@ def _user_key(user_id):
 def get_voice_mode(user_id):
     if user_id is None:
         return False
-    value = USER_VOICE_MODE.get(user_id, MISSING)
-    if value is MISSING:
+    value = USER_VOICE_MODE.get(user_id)
+    if value is None:
         state = get_user_state(_user_key(user_id))
         if state and state.get("voice_mode") is not None:
             value = bool(state.get("voice_mode"))
@@ -225,8 +213,8 @@ def set_voice_mode(user_id, enabled):
 def get_audio_mode(user_id):
     if user_id is None:
         return False
-    value = USER_AUDIO_MODE.get(user_id, MISSING)
-    if value is MISSING:
+    value = USER_AUDIO_MODE.get(user_id)
+    if value is None:
         state = get_user_state(_user_key(user_id))
         if state and state.get("audio_mode") is not None:
             value = bool(state.get("audio_mode"))
@@ -246,14 +234,12 @@ def set_audio_mode(user_id, enabled):
 def get_user_language_pref(user_id):
     if user_id is None:
         return None
-    value = USER_LANG.get(user_id, MISSING)
-    if value is MISSING or not value:
+    value = USER_LANG.get(user_id)
+    if value is None:
         state = get_user_state(_user_key(user_id))
         if state and state.get("lang"):
             value = state.get("lang")
             USER_LANG[user_id] = value
-        elif value is MISSING:
-            value = None
     return value
 
 
@@ -268,14 +254,12 @@ def set_user_language_pref(user_id, lang):
 def get_thread_id_for_user(user_id):
     if user_id is None:
         return None
-    value = USER_THREAD_ID.get(user_id, MISSING)
-    if value is MISSING or not value:
+    value = USER_THREAD_ID.get(user_id)
+    if value is None:
         stored = get_thread(_user_key(user_id))
         if stored:
             USER_THREAD_ID[user_id] = stored
             return stored
-        if value is MISSING:
-            return None
     return value
 
 

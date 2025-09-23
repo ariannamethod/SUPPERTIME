@@ -97,29 +97,78 @@ def _get_openai_client(openai_api_key: Optional[str]):
     retry=retry_if_exception_type(Exception),
     reraise=True,
 )
-def _embed_once(text: str, openai_api_key: str) -> List[float]:
-    text = text or ""
-    if not text.strip():
+def _embed_single(text: str, openai_api_key: str) -> List[float]:
+    value = text or ""
+    if not value.strip():
         return [0.0] * EMBED_DIM
 
     client = _get_openai_client(openai_api_key)
 
     if _OPENAI_CLIENT_STYLE == "v1":
-        # openai>=1.0.0
-        res = client.embeddings.create(model=EMBED_MODEL, input=text)
+        res = client.embeddings.create(model=EMBED_MODEL, input=value)
         return res.data[0].embedding
     else:
-        # legacy
-        res = client.Embedding.create(model=EMBED_MODEL, input=text)
+        res = client.Embedding.create(model=EMBED_MODEL, input=value)
         return res["data"][0]["embedding"]
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(1.0),
+    retry=retry_if_exception_type(Exception),
+    reraise=True,
+)
+def _embed_batch(texts: List[str], openai_api_key: str) -> List[List[float]]:
+    indices_to_embed: List[int] = []
+    payload: List[str] = []
+
+    for idx, text in enumerate(texts):
+        value = (text or "").strip()
+        if not value:
+            continue
+        indices_to_embed.append(idx)
+        payload.append(value)
+
+    embeddings: List[List[float]] = [[0.0] * EMBED_DIM for _ in texts]
+
+    if not payload:
+        return embeddings
+
+    client = _get_openai_client(openai_api_key)
+
+    if _OPENAI_CLIENT_STYLE == "v1":
+        # openai>=1.0.0
+        res = client.embeddings.create(model=EMBED_MODEL, input=payload)
+        data = res.data
+        for out_idx, item in zip(indices_to_embed, data):
+            embeddings[out_idx] = item.embedding
+    else:
+        # legacy
+        res = client.Embedding.create(model=EMBED_MODEL, input=payload)
+        data = res["data"]
+        for out_idx, item in zip(indices_to_embed, data):
+            embeddings[out_idx] = item["embedding"]
+
+    return embeddings
+
 
 def safe_embed(text: str, openai_api_key: str) -> List[float]:
     try:
-        return _embed_once(text, openai_api_key)
+        return _embed_single(text, openai_api_key)
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
         # не валим пайплайн — возвращаем нулевой вектор
         return [0.0] * EMBED_DIM
+
+
+def safe_embed_many(texts: List[str], openai_api_key: str) -> List[List[float]]:
+    if not texts:
+        return []
+    try:
+        return _embed_batch(texts, openai_api_key)
+    except Exception as e:
+        logger.error(f"Embedding batch failed: {e}")
+        return [safe_embed(text, openai_api_key) for text in texts]
 
 # -------------------- Pinecone init --------------------
 
@@ -199,9 +248,20 @@ def vectorize_file(fname: str, openai_api_key: str) -> List[str]:
     file_hash = _sha256_bytes(text.encode("utf-8"))
     ids: List[str] = []
 
-    for idx, chunk in enumerate(chunks):
+    embeddings = safe_embed_many(chunks, openai_api_key)
+    if len(embeddings) != len(chunks):
+        logger.error(
+            "Embedding count mismatch for '%s': expected %d, got %d",
+            fname,
+            len(chunks),
+            len(embeddings),
+        )
+        if len(embeddings) < len(chunks):
+            missing = len(chunks) - len(embeddings)
+            embeddings.extend([[0.0] * EMBED_DIM for _ in range(missing)])
+
+    for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
         meta_id = f"{fname}:{idx}"
-        emb = safe_embed(chunk, openai_api_key)
         try:
             index.upsert(
                 vectors=[(meta_id, emb, {"file": fname, "chunk": idx, "hash": file_hash})]

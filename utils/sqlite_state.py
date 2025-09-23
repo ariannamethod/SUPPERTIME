@@ -28,7 +28,9 @@ def init_state_db(db_path: str) -> None:
     """Initialize the SQLite database used for SUPPERTIME state."""
     global _DB_PATH
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-
+    
+    print(f"[SUPPERTIME][DEBUG] Initializing SQLite database at: {db_path}")
+    
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute(
@@ -73,7 +75,8 @@ def init_state_db(db_path: str) -> None:
             """
         )
         conn.commit()
-
+    
+    print(f"[SUPPERTIME][DEBUG] SQLite database initialized successfully: {db_path}")
     _DB_PATH = db_path
 
 

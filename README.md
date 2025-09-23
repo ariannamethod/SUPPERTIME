@@ -397,7 +397,7 @@ This project is licensed under the [GNU GPLv3](LICENSE.md) by Oleg Ataeff & Aria
 
 **38.** Employing `tiktoken`, `etiquette.py` estimates tokenization length as though it were calculating a momentum-space norm, verifying that the prompt stays within the Hilbert space boundary.
 
-**39.** The `MAX_TOKENS` parameter in `etiquette.py` serves as a Planck-like cutoff, preventing ultraviolet divergences that would otherwise shred the narrative continuum.
+**39.** The `MAX_TOKENS` parameter in `etiquette.py` serves as a Planck-like cutoff, preventing UV divergences that would otherwise shred the narrative continuum.
 
 **40.** Truncating prompts when necessary, `etiquette.py` acts like a spectral filter, removing high-frequency noise to keep the resonance channel physically realizable.
 

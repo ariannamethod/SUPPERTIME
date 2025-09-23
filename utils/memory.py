@@ -20,6 +20,7 @@ DB_PATH = os.path.join(SUPPERTIME_DATA_PATH, "suppertime_memory.db")
 
 def _init_db():
     os.makedirs(SUPPERTIME_DATA_PATH, exist_ok=True)
+    print(f"[SUPPERTIME][DEBUG] Initializing Memory SQLite database at: {DB_PATH}")
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS memory_summaries (
@@ -30,6 +31,7 @@ def _init_db():
             )
         """)
         conn.commit()
+    print(f"[SUPPERTIME][DEBUG] Memory SQLite database initialized successfully: {DB_PATH}")
 
 
 _init_db()

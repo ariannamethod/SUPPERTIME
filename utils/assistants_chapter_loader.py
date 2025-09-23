@@ -11,7 +11,8 @@ from typing import Optional, Dict, Any
 
 # Paths
 DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
-CHAPTERS_DIR = os.path.join(DATA_PATH, "chapters")
+# Chapters are in the root directory, not in data/
+CHAPTERS_DIR = os.getenv("SUPPERTIME_CHAPTERS_DIR", "./chapters")
 CACHE_PATH = os.path.join(DATA_PATH, "chapter_cache.json")
 ASSISTANT_ID_PATH = os.path.join(DATA_PATH, "assistant_id.txt")
 DB_PATH = os.path.join(DATA_PATH, "suppertime_memory.db")

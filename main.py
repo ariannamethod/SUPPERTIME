@@ -77,13 +77,13 @@ STATE_DB_PATH = os.path.join(SUPPERTIME_DATA_PATH, "suppertime.db")
 # User settings
 STATE_TTL_SECONDS = int(os.getenv("STATE_TTL_SECONDS", 24 * 60 * 60))
 STATE_CLEANUP_INTERVAL = int(os.getenv("STATE_CLEANUP_INTERVAL", 60))
-USER_VOICE_MODE = ExpiringDict(STATE_TTL_SECONDS)  # Track which users have voice enabled
-USER_AUDIO_MODE = ExpiringDict(STATE_TTL_SECONDS)
-USER_LAST_MESSAGE = ExpiringDict(STATE_TTL_SECONDS)
-USER_LANG = ExpiringDict(STATE_TTL_SECONDS)
-CHAT_HISTORY = ExpiringDict(STATE_TTL_SECONDS)
-CONVERSATION_LOG = ExpiringDict(STATE_TTL_SECONDS)
-PENDING_DRAFT = ExpiringDict(STATE_TTL_SECONDS)
+USER_VOICE_MODE = ExpiringDict(STATE_TTL_SECONDS, namespace="USER_VOICE_MODE")  # Track which users have voice enabled
+USER_AUDIO_MODE = ExpiringDict(STATE_TTL_SECONDS, namespace="USER_AUDIO_MODE")
+USER_LAST_MESSAGE = ExpiringDict(STATE_TTL_SECONDS, namespace="USER_LAST_MESSAGE")
+USER_LANG = ExpiringDict(STATE_TTL_SECONDS, namespace="USER_LANG")
+CHAT_HISTORY = ExpiringDict(STATE_TTL_SECONDS, namespace="CHAT_HISTORY")
+CONVERSATION_LOG = ExpiringDict(STATE_TTL_SECONDS, namespace="CONVERSATION_LOG")
+PENDING_DRAFT = ExpiringDict(STATE_TTL_SECONDS, namespace="PENDING_DRAFT")
 MAX_HISTORY_MESSAGES = 7
 MAX_PROMPT_TOKENS = 8000
 
@@ -97,7 +97,7 @@ TELEGRAM_FILE_URL = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 
 # Thread storage
 THREAD_STORAGE_PATH = os.path.join(SUPPERTIME_DATA_PATH, "threads")
-USER_THREAD_ID = ExpiringDict(STATE_TTL_SECONDS)
+USER_THREAD_ID = ExpiringDict(STATE_TTL_SECONDS, namespace="USER_THREAD_ID")
 
 # Emoji constants
 EMOJI = {

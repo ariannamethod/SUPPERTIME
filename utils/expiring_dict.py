@@ -71,3 +71,8 @@ class ExpiringCache:
 
     def __len__(self):
         return len(self.keys())
+
+
+class ExpiringDict(ExpiringCache):
+    """Backward-compatible alias for older imports."""
+    pass

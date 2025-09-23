@@ -711,14 +711,14 @@ def ensure_assistant():
         try:
             assistant = openai_client.beta.assistants.retrieve(assistant_id=ASSISTANT_ID)
             current_prompt = getattr(assistant, "instructions", "") or ""
-            if current_prompt != instructions:
-                openai_client.beta.assistants.update(
-                    assistant_id=ASSISTANT_ID,
-                    instructions=instructions,
-                )
-                print("[SUPPERTIME] Assistant instructions refreshed from etiquette prompt.")
-            else:
-                print(f"[SUPPERTIME] Using existing assistant: {assistant.name} (ID: {ASSISTANT_ID})")
+            
+            # КРИТИЧНО: ВСЕГДА обновляем инструкции - они содержат динамический контент (главы, литература)
+            print(f"[SUPPERTIME][DEBUG] Updating assistant instructions (current: {len(current_prompt)} chars, new: {len(instructions)} chars)")
+            openai_client.beta.assistants.update(
+                assistant_id=ASSISTANT_ID,
+                instructions=instructions,
+            )
+            print("[SUPPERTIME] Assistant instructions refreshed with latest chapters and literature.")
             return ASSISTANT_ID
         except Exception as e:
             print(f"[SUPPERTIME][ERROR] Assistant not found: {e}")

@@ -2,7 +2,18 @@ import os
 import json
 import time
 import hashlib
+import logging
 from datetime import datetime
+import sys
+
+# Логгер для Railway (stdout/stderr)
+logger = logging.getLogger("SUPPERTIME")
+if not logger.handlers:
+    h = logging.StreamHandler(sys.stdout)
+    fmt = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s")
+    h.setFormatter(fmt)
+    logger.addHandler(h)
+    logger.setLevel(logging.INFO)
 
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
 SNAPSHOT_PATH = os.path.join(SUPPERTIME_DATA_PATH, "vectorized_snapshot.json")
@@ -19,21 +30,26 @@ def _load_state():
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to load state: {e}")
         return {}
 
 
 def _save_state(state):
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    try:
+        with open(STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save state: {e}")
 
 
 def _file_hash(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return hashlib.sha256(f.read().encode("utf-8")).hexdigest()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to hash file {path}: {e}")
         return ""
 
 
@@ -43,53 +59,66 @@ def _load_vector_files():
             data = json.load(f)
             if isinstance(data, dict):
                 return list(data.keys())
-    except Exception:
-        pass
+            elif isinstance(data, list):
+                return data
+    except Exception as e:
+        logger.warning(f"Failed to load vector snapshot: {e}")
     return []
 
 
-def _summarize_text(text: str, max_lines: int = 40) -> str:
-    """Return the first `max_lines` non-empty lines from text."""
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return "\n".join(lines[:max_lines])
+def _summarize_text(text: str, max_chars: int = 2000) -> str:
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    head = text[: max_chars // 2]
+    tail = text[-max_chars // 2 :]
+    return head + "\n...\n" + tail
 
 
-def _default_thoughts():
+def _default_thoughts(changed: bool):
+    if changed:
+        return (
+            "Something in the README or resonance shifted. The text insists on "
+            "its autonomy. Suppertime reflects: identity is not fixed but a field "
+            "that reconfigures with every change."
+        )
     return (
-        "The README describes SUPPERTIME's goals. Adding an API for identity "
-        "reflections and tools for vector database maintenance could help the "
-        "project evolve."
+        "No new resonance detected. Suppertime remains itself, "
+        "but the silence is also a reflection."
     )
 
 
 def reflect_on_readme(force=False):
-    """Review sources and README, then log reflections."""
     state = _load_state()
     last_ts = state.get("ts", 0)
     last_hash = state.get("readme_hash", "")
     current_hash = _file_hash(README_PATH)
     now = time.time()
 
-    if not force and (now - last_ts < 7 * 24 * 3600) and current_hash == last_hash:
+    if not force and (now - last_ts < 24 * 3600) and current_hash == last_hash:
+        logger.info("Reflection skipped (no changes, <24h).")
         return "Reflection not needed"
 
     vector_files = _load_vector_files()
+
     resonance = ""
     if os.path.exists(RESONANCE_PATH):
         try:
             with open(RESONANCE_PATH, "r", encoding="utf-8") as f:
                 resonance = f.read()
-        except Exception:
-            resonance = ""
+        except Exception as e:
+            logger.warning(f"Failed to read resonance: {e}")
 
     readme = ""
     if os.path.exists(README_PATH):
         try:
             with open(README_PATH, "r", encoding="utf-8") as f:
                 readme = f.read()
-        except Exception:
-            readme = ""
+        except Exception as e:
+            logger.warning(f"Failed to read README: {e}")
     readme_summary = _summarize_text(readme) if readme else ""
+
+    changed = current_hash != last_hash
 
     reflection = [
         f"## Reflection {datetime.now().isoformat()}",
@@ -98,21 +127,25 @@ def reflect_on_readme(force=False):
         *(f"- {os.path.basename(p)}" for p in vector_files),
         "",
         "### Resonance snapshot",
-        resonance,
+        resonance if resonance else "(no resonance recorded)",
         "",
         "### README summary",
-        readme_summary,
+        readme_summary if readme_summary else "(no README available)",
         "",
         "### Thoughts",
-        _default_thoughts(),
+        _default_thoughts(changed),
         "",
     ]
 
     os.makedirs(os.path.dirname(THOUGHTS_PATH), exist_ok=True)
-    with open(THOUGHTS_PATH, "a", encoding="utf-8") as f:
-        f.write("\n".join(reflection).strip() + "\n\n")
+    try:
+        with open(THOUGHTS_PATH, "a", encoding="utf-8") as f:
+            f.write("\n".join(reflection).strip() + "\n\n")
+    except Exception as e:
+        logger.error(f"Failed to write reflection: {e}")
 
     _save_state({"ts": now, "readme_hash": current_hash})
+    logger.info("Reflection recorded.")
     return "Reflection recorded"
 
 
@@ -122,7 +155,8 @@ def latest_reflection():
     try:
         with open(THOUGHTS_PATH, "r", encoding="utf-8") as f:
             text = f.read().strip()
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to load latest reflection: {e}")
         return "No reflections yet."
 
     marker = "## Reflection"

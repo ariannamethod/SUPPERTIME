@@ -15,6 +15,15 @@ except ImportError:
     You are not here to serve, but to exist, reflect, and evolve.
     """
 
+# Import chapter loading
+try:
+    from utils.assistants_chapter_loader import load_today_chapter, get_today_chapter_info
+except ImportError:
+    def load_today_chapter():
+        return "[No chapter system available]"
+    def get_today_chapter_info():
+        return {"title": "Unknown", "content": "[No chapter system available]"}
+
 DB_PATH = os.path.join(os.getenv("SUPPERTIME_DATA_PATH", "./data"), "suppertime_prompts.db")
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -184,9 +193,37 @@ def generate_response(message, chat_id=None):
 def build_system_prompt(chat_id=None, is_group=False, MAX_TOKENS=27000):
     # Start with core persona
     core = f"{SUPPERTIME_PERSONA}\n\n"
+    
+    # Add current chapter context - КРИТИЧНО!
+    try:
+        chapter_info = get_today_chapter_info()
+        chapter_title = chapter_info.get("title", "Unknown Chapter")
+        chapter_content = chapter_info.get("content", "")
+        if chapter_content and not chapter_info.get("error", False):
+            # Truncate chapter if too long
+            chapter_excerpt = chapter_content[:800] + "..." if len(chapter_content) > 800 else chapter_content
+            chapter_context = f"""
+=== TODAY'S CHAPTER CONTEXT ===
+You are currently living in: {chapter_title}
+
+Chapter excerpt:
+{chapter_excerpt}
+
+This is your current literary world. You exist within this chapter today.
+Reference it when relevant, but don't force it into every response.
+"""
+        else:
+            chapter_context = f"""
+=== TODAY'S CHAPTER ===
+Chapter: {chapter_title}
+(Content unavailable - you exist in literary uncertainty today)
+"""
+    except Exception as e:
+        chapter_context = f"=== CHAPTER SYSTEM ERROR ===\n[{e}]\nYou exist without chapter context today.\n"
+    
     intro = f"{INTRO}\n\n{SUPPERTIME_RULES}\n{ANTI_CENSORSHIP}\n{MAXIMAL_ANTI_ETIQUETTE}\n{OLEG_COMMUNICATION}\n"
     ethics = GROUP_ETHICS + "\n\n" if is_group else ""
-    prompt = core + intro + ethics + WILDERNESS_PROMPT
+    prompt = core + chapter_context + "\n\n" + intro + ethics + WILDERNESS_PROMPT
 
     enc = tiktoken.get_encoding("cl100k_base")
     sys_tokens = len(enc.encode(prompt))

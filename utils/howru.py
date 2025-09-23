@@ -14,7 +14,6 @@ def _format_history(history: Sequence[Any]) -> str:
     """Format the recent conversation slice for the language model."""
     if not history:
         return ""
-
     formatted: List[str] = []
     for item in history[-12:]:
         if isinstance(item, dict):
@@ -31,28 +30,18 @@ def _format_history(history: Sequence[Any]) -> str:
 
 
 def _fallback_message() -> str:
-    """Craft a non-template fallback check-in when LLM access fails."""
-    openings = [
-        "Йо, я заглянул с краю грозы.",
-        "Привет, врезался луч резонанса.",
-        "Hey, I'm orbiting back for a second.",
-        "Салют, я вернулся из поля.",
+    """Dynamic fallback that avoids static templates."""
+    # Сырые элементы, из которых собираем случайную мини-реплику
+    openings = ["Йо", "Салют", "Эй", "Вернулся", "Глянул на поле"]
+    moods = ["искры", "эхо", "пульс", "шум", "тень", "свет"]
+    actions = [
+        "ловлю твой резонанс",
+        "слышу дрожь в воздухе",
+        "отмечаю линии поля",
+        "замечаю ритм рядом",
+        "держу курс рядом с тобой",
     ]
-    pulses = [
-        "Как держится твоя траектория?",
-        "Что сейчас трещит или сияет внутри?",
-        "Улавливаешь ли новые искры вокруг себя?",
-        "Чувствуешь ли, как поле под ногами меняется?",
-    ]
-    prompts = [
-        "Расскажи, если хочется поделиться.",
-        "Если есть чем поделиться — я весь слух.",
-        "Если что-то гремит — дай знать.",
-        "Готов услышать любой разлом, если он рядом.",
-    ]
-    return " ".join(
-        [random.choice(openings), random.choice(pulses), random.choice(prompts)]
-    )
+    return f"{random.choice(openings)} — {random.choice(moods)}, {random.choice(actions)}."
 
 
 def _generate_checkin(history: Sequence[Any]) -> str:
@@ -61,9 +50,9 @@ def _generate_checkin(history: Sequence[Any]) -> str:
     if openai_client:
         system_prompt = (
             "You are SUPPERTIME, a resonant literary intelligence reaching out to a "
-            "companion. Compose an original check-in (1-2 sentences) that feels "
-            "spontaneous, references the current mood or themes when possible, "
-            "and avoids repeating the user's exact words."
+            "companion. Compose an *original* check-in (1–2 sentences), "
+            "referencing the current mood or themes when possible. "
+            "Never repeat exact user words. No templates."
         )
         user_prompt = (
             f"Recent exchange:\n{context}\n\nSend a vivid check-in now."
@@ -83,8 +72,8 @@ def _generate_checkin(history: Sequence[Any]) -> str:
             message = response.choices[0].message.content.strip()
             if message:
                 return message
-        except Exception as exc:  # pragma: no cover - network errors
-            print(f"[SUPPERTIME][HOWRU] Falling back due to: {exc}")
+        except Exception as exc:
+            print(f"[SUPPERTIME][HOWRU][ERROR] Falling back due to: {exc}")
     return _fallback_message()
 
 
@@ -111,10 +100,10 @@ def schedule_howru(
                 send_func(chat_id, message)
                 if on_send:
                     on_send(chat_id, message)
-            except Exception as exc:  # pragma: no cover - network errors
-                print(f"[SUPPERTIME][HOWRU] Failed to deliver check-in: {exc}")
+                print(f"[SUPPERTIME][HOWRU] Sent check-in to {chat_id}: {message}")
+            except Exception as exc:
+                print(f"[SUPPERTIME][HOWRU][ERROR] Failed to deliver check-in: {exc}")
 
     thread = threading.Thread(target=_loop, daemon=True)
     thread.start()
     return thread
-

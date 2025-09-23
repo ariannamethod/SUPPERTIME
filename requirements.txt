@@ -6,7 +6,7 @@ tiktoken>=0.6.0
 requests
 beautifulsoup4
 pydub>=0.25.1
-uvicorn[standard]>=0.30.0
+gunicorn>=21.2.0
 pypdf
 pinecone
 tenacity

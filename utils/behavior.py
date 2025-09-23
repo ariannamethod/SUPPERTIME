@@ -3,7 +3,7 @@
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 DB_PATH = Path("./data/behavior.db")
 
@@ -77,8 +77,15 @@ def build_context_block(message: str) -> str:
     return ""
 
 
-def inject_behavior(message: str, base_prompt: str) -> str:
-    """Вставляет в промпт блоки контекста (если есть)."""
+def inject_behavior(message: Optional[str] = None, base_prompt: Optional[str] = None) -> str:
+    """Вставляет в промпт блоки контекста (если есть).
+
+    Поддерживает вызов без параметров для обратной совместимости: в этом случае
+    возвращается исходный промпт (или пустая строка, если он не задан).
+    """
+    if message is None or base_prompt is None:
+        return base_prompt or ""
+
     context_block = build_context_block(message)
     if context_block:
         return base_prompt + "\n\n" + context_block

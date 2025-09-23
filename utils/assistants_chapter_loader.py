@@ -84,8 +84,19 @@ def get_assistant_id() -> Optional[str]:
 
 def get_all_chapter_files():
     try:
-        return sorted(f for f in os.listdir(CHAPTERS_DIR) if f.startswith("st") and f.endswith(".md"))
-    except FileNotFoundError:
+        print(f"[SUPPERTIME][DEBUG] Looking for chapters in: {CHAPTERS_DIR}")
+        print(f"[SUPPERTIME][DEBUG] CHAPTERS_DIR exists: {os.path.exists(CHAPTERS_DIR)}")
+        if os.path.exists(CHAPTERS_DIR):
+            files = os.listdir(CHAPTERS_DIR)
+            print(f"[SUPPERTIME][DEBUG] Found files in CHAPTERS_DIR: {files[:5]}")  # First 5 files
+            chapter_files = sorted(f for f in files if f.startswith("st") and f.endswith(".md"))
+            print(f"[SUPPERTIME][DEBUG] Chapter files: {len(chapter_files)} found")
+            return chapter_files
+        else:
+            print(f"[SUPPERTIME][ERROR] CHAPTERS_DIR does not exist: {CHAPTERS_DIR}")
+            return []
+    except Exception as e:
+        print(f"[SUPPERTIME][ERROR] Error listing chapters: {e}")
         return []
 
 
@@ -136,23 +147,35 @@ def extract_chapter_title(content: str) -> str:
 # --- Cache / rotation ---
 def get_today_chapter_info() -> Dict[str, Any]:
     today = datetime.date.today().isoformat()
+    print(f"[SUPPERTIME][DEBUG] get_today_chapter_info called for date: {today}")
 
     cached = load_rotation_from_db(today)
     if cached:
+        print(f"[SUPPERTIME][DEBUG] Using cached chapter: {cached.get('title', 'Unknown')}")
         return cached
 
     path = get_today_chapter_path()
+    print(f"[SUPPERTIME][DEBUG] Chapter path resolved to: {path}")
+    
     if isinstance(path, str) and path.startswith("[Resonator]"):
         info = {"date": today, "path": None, "title": path, "content": "", "error": True}
+        print(f"[SUPPERTIME][ERROR] Chapter path error: {path}")
     else:
+        print(f"[SUPPERTIME][DEBUG] Loading content from: {path}")
         content = load_chapter_content(path)
+        print(f"[SUPPERTIME][DEBUG] Loaded content length: {len(content)} chars")
+        
         if content.startswith("[Resonator]"):
             info = {"date": today, "path": path, "title": content, "content": "", "error": True}
+            print(f"[SUPPERTIME][ERROR] Content loading error: {content[:100]}...")
         else:
             title = extract_chapter_title(content)
+            print(f"[SUPPERTIME][DEBUG] Extracted title: '{title}'")
+            print(f"[SUPPERTIME][DEBUG] Content preview: {content[:200]}...")
             info = {"date": today, "path": path, "title": title, "content": content, "error": False}
 
     save_rotation_to_db(today, info["path"] or "", info["title"], info.get("content", ""), info["error"])
+    print(f"[SUPPERTIME][DEBUG] Final chapter info: title='{info.get('title')}', error={info.get('error')}, content_length={len(info.get('content', ''))}")
     return info
 
 

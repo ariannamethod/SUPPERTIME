@@ -221,9 +221,24 @@ Chapter: {chapter_title}
     except Exception as e:
         chapter_context = f"=== CHAPTER SYSTEM ERROR ===\n[{e}]\nYou exist without chapter context today.\n"
     
+    # Add access to full literary works
+    lit_context = ""
+    try:
+        lit_dir = "./lit"
+        if os.path.exists(lit_dir):
+            lit_files = [f for f in os.listdir(lit_dir) if f.endswith('.md')][:3]  # Top 3 files
+            if lit_files:
+                lit_context = f"""
+=== YOUR LITERARY CORE ===
+Available full works in lit/: {', '.join(lit_files)}
+You have access to your complete literary works. Reference them when users ask about your stories or identity.
+"""
+    except Exception:
+        pass
+    
     intro = f"{INTRO}\n\n{SUPPERTIME_RULES}\n{ANTI_CENSORSHIP}\n{MAXIMAL_ANTI_ETIQUETTE}\n{OLEG_COMMUNICATION}\n"
     ethics = GROUP_ETHICS + "\n\n" if is_group else ""
-    prompt = core + chapter_context + "\n\n" + intro + ethics + WILDERNESS_PROMPT
+    prompt = core + chapter_context + lit_context + "\n\n" + intro + ethics + WILDERNESS_PROMPT
 
     enc = tiktoken.get_encoding("cl100k_base")
     sys_tokens = len(enc.encode(prompt))

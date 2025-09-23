@@ -3,9 +3,10 @@ import glob
 import json
 import hashlib
 import threading
+import sqlite3
+import time
 
 from utils.whatdotheythinkiam import reflect_on_readme
-
 from utils.vector_store import vectorize_file, semantic_search_in_file
 
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
@@ -15,9 +16,29 @@ if not os.path.isdir(LIT_DIR):
     if os.path.isdir(fallback):
         LIT_DIR = fallback
 
+# --- Paths ---
+CACHE_DB = os.path.join(SUPPERTIME_DATA_PATH, "cache", "suppertime_memory.db")
 SNAPSHOT_PATH = os.path.join(SUPPERTIME_DATA_PATH, "vectorized_snapshot.json")
+os.makedirs(os.path.dirname(CACHE_DB), exist_ok=True)
 
+# --- Init SQLite ---
+def init_cache():
+    with sqlite3.connect(CACHE_DB) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS lit_snapshot (
+                path TEXT PRIMARY KEY,
+                hash TEXT,
+                last_indexed REAL,
+                tags TEXT,
+                summary TEXT,
+                relevance REAL
+            )
+        """)
+        conn.commit()
 
+init_cache()
+
+# --- JSON snapshot fallback ---
 def _load_snapshot():
     try:
         with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
@@ -25,13 +46,37 @@ def _load_snapshot():
     except Exception:
         return {}
 
-
 def _save_snapshot(snapshot):
     os.makedirs(os.path.dirname(SNAPSHOT_PATH), exist_ok=True)
     with open(SNAPSHOT_PATH, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, ensure_ascii=False, indent=2)
 
+# --- SQLite helpers ---
+def load_lit_file(path):
+    with sqlite3.connect(CACHE_DB) as conn:
+        cursor = conn.execute(
+            "SELECT hash, tags, summary, relevance FROM lit_snapshot WHERE path=?",
+            (path,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {"hash": row[0], "tags": row[1], "summary": row[2], "relevance": row[3]}
+    return None
 
+def save_lit_file(path, h, tags="", summary="", relevance=0.0):
+    with sqlite3.connect(CACHE_DB) as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO lit_snapshot (path, hash, last_indexed, tags, summary, relevance)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (path, h, time.time(), tags, summary, relevance))
+        conn.commit()
+
+def list_lit_files():
+    with sqlite3.connect(CACHE_DB) as conn:
+        cursor = conn.execute("SELECT path FROM lit_snapshot")
+        return [row[0] for row in cursor.fetchall()]
+
+# --- Hash util ---
 def _file_hash(path):
     try:
         hash_sha = hashlib.sha256()
@@ -42,7 +87,7 @@ def _file_hash(path):
     except Exception:
         return ""
 
-
+# --- Vectorization ---
 def vectorize_lit_files():
     """Vectorize new or updated literary files."""
     lit_files = (
@@ -52,30 +97,35 @@ def vectorize_lit_files():
     if not lit_files:
         return "No literary files found in the lit directory."
 
-    snapshot = _load_snapshot()
+    snapshot_json = _load_snapshot()
     changed = []
+
     for path in lit_files:
         h = _file_hash(path)
         if not h:
             continue
-        if snapshot.get(path) != h:
+
+        cached = load_lit_file(path)
+        if not cached or cached["hash"] != h:
             try:
                 vectorize_file(path, os.getenv("OPENAI_API_KEY"))
-                snapshot[path] = h
+                save_lit_file(path, h)  # tags/summary/relevance можно апдейтить позже
+                snapshot_json[path] = h
                 changed.append(path)
             except Exception as e:
                 print(f"[SUPPERTIME][ERROR] Failed to vectorize {path}: {e}")
+
     if changed:
-        _save_snapshot(snapshot)
+        _save_snapshot(snapshot_json)
         return f"Indexed {len(changed)} files."
     return "No new literary files to index."
 
-
 def get_vectorized_files():
     """Return list of vectorized literary files."""
-    snapshot = _load_snapshot()
-    return list(snapshot.keys())
-
+    files = list_lit_files()
+    if files:
+        return files
+    return list(_load_snapshot().keys())
 
 def search_lit_files(query):
     """Search vectorized literary files for a query."""
@@ -101,7 +151,7 @@ def search_lit_files(query):
         return "\n\n==========\n\n".join(results)
     return "No relevant information found in the literary files."
 
-
+# --- Local logs search ---
 def _search_logs(query):
     """Search in journal and other data files for the query."""
     query_lower = query.lower()
@@ -138,7 +188,7 @@ def _search_logs(query):
             print(f"[SUPPERTIME][ERROR] Failed to search in {name}: {e}")
     return hits
 
-
+# --- Unified search ---
 def search_memory(query):
     """Search both vectorized literary files and local logs."""
     lit_res = search_lit_files(query)
@@ -153,7 +203,7 @@ def search_memory(query):
         return "\n\n==========\n\n".join(pieces)
     return "No relevant information found in the memory."
 
-
+# --- Lit explorer ---
 def explore_lit_directory():
     """Return information about literary files and their status."""
     lit_files = (
@@ -167,7 +217,8 @@ def explore_lit_directory():
     report = [f"Found {len(lit_files)} literary files:"]
     for path in lit_files:
         file_name = os.path.basename(path)
-        status = "Indexed" if path in snapshot else "Not indexed"
+        cached = load_lit_file(path)
+        status = "Indexed" if cached or path in snapshot else "Not indexed"
         try:
             size_kb = os.path.getsize(path) / 1024
             with open(path, "r", encoding="utf-8") as f:
@@ -182,14 +233,12 @@ def explore_lit_directory():
             report.append(f"\n**{file_name}** - {status} (Error reading file)")
     return "\n".join(report)
 
-
-# Thread control events
+# --- Thread controls ---
 _lit_check_event = threading.Event()
 _lit_check_thread = None
 
 _identity_reflection_event = threading.Event()
 _identity_reflection_thread = None
-
 
 def schedule_lit_check(interval_hours=72):
     """Periodically check the lit folder for new files."""
@@ -207,20 +256,16 @@ def schedule_lit_check(interval_hours=72):
     _lit_check_thread.start()
     return _lit_check_thread
 
-
 def stop_lit_check():
     """Stop the lit folder checking loop."""
-
     _lit_check_event.set()
     if _lit_check_thread:
         _lit_check_thread.join()
-
 
 def schedule_identity_reflection(interval_days=7):
     """Run README reflection on startup and weekly."""
 
     def _loop():
-        # initial run
         reflect_on_readme(force=True)
         while True:
             if _identity_reflection_event.is_set():
@@ -237,10 +282,8 @@ def schedule_identity_reflection(interval_days=7):
     _identity_reflection_thread.start()
     return _identity_reflection_thread
 
-
 def stop_identity_reflection():
     """Stop the identity reflection loop."""
-
     _identity_reflection_event.set()
     if _identity_reflection_thread:
         _identity_reflection_thread.join()

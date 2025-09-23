@@ -43,6 +43,7 @@ from utils.config import (
     vectorize_lit_files,
     search_memory,
     explore_lit_directory,
+    schedule_identity_reflection,
 )
 from utils.resonator import schedule_resonance_creation, create_resonance_now
 import utils.resonator as resonator
@@ -1387,6 +1388,8 @@ async def startup_event():
 
     # Start resonance creation schedule
     schedule_resonance_creation()
+    # Start identity reflection (self-awareness)
+    schedule_identity_reflection(interval_days=1)  # Daily self-reflection
     # Periodic friendly check-ins
     schedule_howru(
         lambda: [

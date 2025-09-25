@@ -231,8 +231,8 @@ def build_system_prompt(chat_id=None, is_group=False, MAX_TOKENS=27000):
                 chapter_excerpt = '\n'.join(chapter_lines[:200])  # Максимум 200 строк
                 print(f"[SUPPERTIME][DEBUG] Extracted chapter excerpt: {len(chapter_excerpt)} chars")
             else:
-                   # Увеличиваем лимит для полного чтения глав
-                   chapter_excerpt = chapter_content[:8000] + "..." if len(chapter_content) > 8000 else chapter_content
+                # Увеличиваем лимит для полного чтения глав
+                chapter_excerpt = chapter_content[:8000] + "..." if len(chapter_content) > 8000 else chapter_content
             
             chapter_context = f"""
 === TODAY'S CHAPTER CONTEXT ===

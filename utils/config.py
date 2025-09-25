@@ -89,11 +89,23 @@ def _file_hash(path):
 
 # --- Vectorization ---
 def vectorize_lit_files():
-    """Vectorize new or updated literary files."""
-    lit_files = (
-        glob.glob(os.path.join(LIT_DIR, "*.txt"))
-        + glob.glob(os.path.join(LIT_DIR, "*.md"))
-    )
+    """Vectorize new or updated literary files (P1 FIX: recursive with os.walk)."""
+    lit_files = []
+    
+    # Recursive scan with os.walk for all subdirectories
+    if os.path.exists(LIT_DIR):
+        for root, dirs, files in os.walk(LIT_DIR):
+            for file in files:
+                if file.lower().endswith(('.txt', '.md')):
+                    # Try to read as UTF-8 (Copilot requirement)
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            f.read(100)  # Test if it's readable UTF-8
+                        lit_files.append(file_path)
+                    except (UnicodeDecodeError, Exception):
+                        print(f"[SUPPERTIME][WARNING] Skipping non-UTF-8 file: {file_path}")
+    
     if not lit_files:
         return "No literary files found in the lit directory."
 
@@ -205,11 +217,16 @@ def search_memory(query):
 
 # --- Lit explorer ---
 def explore_lit_directory():
-    """Return information about literary files and their status."""
-    lit_files = (
-        glob.glob(os.path.join(LIT_DIR, "*.txt"))
-        + glob.glob(os.path.join(LIT_DIR, "*.md"))
-    )
+    """Return information about literary files and their status (P1 FIX: recursive)."""
+    lit_files = []
+    
+    # Recursive scan matching vectorize_lit_files logic
+    if os.path.exists(LIT_DIR):
+        for root, dirs, files in os.walk(LIT_DIR):
+            for file in files:
+                if file.lower().endswith(('.txt', '.md')):
+                    lit_files.append(os.path.join(root, file))
+    
     if not lit_files:
         return "No literary files found in the lit directory."
 

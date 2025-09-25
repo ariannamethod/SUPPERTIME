@@ -583,6 +583,46 @@ def send_voice_keyboard(chat_id):
         print(f"[SUPPERTIME][ERROR] Failed to send keyboard: {e}")
         return False
 
+async def send_long_message(chat_id, text, reply_to_message_id=None, parse_mode="Markdown"):
+    """Send long messages by splitting them into chunks (P1 FIX)."""
+    if len(text) <= 4000:  # Telegram limit is ~4096, leave some margin
+        return await send_telegram_message_async(chat_id, text, reply_to_message_id, parse_mode)
+    
+    # Split into chunks
+    chunks = []
+    current_chunk = ""
+    
+    for line in text.split('\n'):
+        if len(current_chunk) + len(line) + 1 > 4000:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = line
+            else:
+                # Single line too long, force split
+                while len(line) > 4000:
+                    chunks.append(line[:4000])
+                    line = line[4000:]
+                current_chunk = line
+        else:
+            if current_chunk:
+                current_chunk += '\n' + line
+            else:
+                current_chunk = line
+    
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    # Send chunks sequentially
+    success = True
+    for i, chunk in enumerate(chunks):
+        chunk_reply_id = reply_to_message_id if i == 0 else None
+        if not await send_telegram_message_async(chat_id, chunk, chunk_reply_id, parse_mode):
+            success = False
+        # Small delay between chunks
+        await asyncio.sleep(0.5)
+    
+    return success
+
 def set_bot_commands():
     """Register basic bot commands with Telegram."""
     if not TELEGRAM_BOT_TOKEN:

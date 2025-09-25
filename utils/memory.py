@@ -74,7 +74,7 @@ def _init_db():
     print(f"[SUPPERTIME][DEBUG] Memory SQLite database initialized successfully: {DB_PATH}")
 
 
-_init_db()
+# НЕ вызываем _init_db() при импорте - будет вызвано в MemoryManager.__init__
 
 
 def save_summary(summary: str, extra: Optional[Dict] = None) -> None:
@@ -193,6 +193,9 @@ class MemoryManager:
         self.db_path = db_path
         self.vectorstore = vectorstore
         self.openai_client = None  # Будет установлен извне
+        
+        # Инициализируем БД при создании экземпляра
+        _init_db()
         
     async def __aenter__(self):
         """Async context manager entry."""

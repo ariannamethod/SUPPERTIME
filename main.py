@@ -62,6 +62,7 @@ from utils.sqlite_state import (
     set_user_state,
 )
 from utils.lit_monitor import LitMonitor
+from utils.repo_monitor import schedule_repo_watch
 
 # Constants and configuration
 SUPPERTIME_DATA_PATH = os.getenv("SUPPERTIME_DATA_PATH", "./data")
@@ -384,7 +385,7 @@ def send_telegram_typing(chat_id):
         print(f"[SUPPERTIME][ERROR] Failed to send typing action: {e}")
         return False
 
-async def send_telegram_message_async(chat_id, text, reply_to_message_id=None, parse_mode="Markdown", _retry=False):
+async def send_telegram_message_async(chat_id, text, reply_to_message_id=None, parse_mode="Markdown", _retry=False, _attempt=0):
     """Send a message to Telegram."""
     if not TELEGRAM_BOT_TOKEN:
         print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send message")
@@ -439,6 +440,16 @@ async def send_telegram_message_async(chat_id, text, reply_to_message_id=None, p
                             )
                             reply_to_message_id = None
                         return True
+                    
+                    # P0 FIX: Exponential backoff for 429/5xx errors
+                    if (response.status == 429 or response.status >= 500) and _attempt < 3:
+                        delay = (2 ** _attempt) + random.uniform(0, 1)
+                        print(f"[SUPPERTIME][WARNING] Telegram {response.status}, retrying in {delay:.1f}s (attempt {_attempt + 1}/3)")
+                        await asyncio.sleep(delay)
+                        return await send_telegram_message_async(
+                            chat_id, text, reply_to_message_id, parse_mode, _retry, _attempt + 1
+                        )
+                    
                     return False
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to send message: {e}")
@@ -832,7 +843,10 @@ async def query_openai(prompt, chat_id=None):
             assistant_id=assistant_id,
         )
 
-        # Wait for the run to complete
+        # Wait for the run to complete with exponential backoff (P0 FIX)
+        attempt = 0
+        base_delay = 2
+        max_delay = 30
         while True:
             run = await asyncio.to_thread(
                 openai_client.beta.threads.runs.retrieve,
@@ -843,25 +857,32 @@ async def query_openai(prompt, chat_id=None):
                 break
             elif run.status in ["failed", "expired", "cancelled"]:
                 return f"SUPPERTIME encountered an issue: {run.status}"
-            # Send typing indicator every 3 seconds while processing
+            
+            # Exponential backoff with jitter for rate limits
+            delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)
+            attempt += 1
+            
+            # Send typing indicator while processing
             if chat_id:
                 await asyncio.to_thread(send_telegram_typing, chat_id)
-            await asyncio.sleep(3)
+            await asyncio.sleep(delay)
 
         # Get the latest message from the thread
         messages = await asyncio.to_thread(
             openai_client.beta.threads.messages.list, thread_id=thread_id
         )
 
-        # Extract the first assistant response
-        for message in messages.data:
-            if message.role == "assistant":
-                answer = message.content[0].text.value
-                # Cache the response
-                OPENAI_CACHE[hash_key] = answer
-                set_openai_cache(hash_key, answer)
-                save_cache()
-                return answer
+        # Extract the LATEST assistant response by created_at (P0 FIX)
+        assistant_messages = [msg for msg in messages.data if msg.role == "assistant"]
+        if assistant_messages:
+            # Sort by created_at descending to get the newest first
+            latest_message = sorted(assistant_messages, key=lambda x: x.created_at, reverse=True)[0]
+            answer = latest_message.content[0].text.value
+            # Cache the response
+            OPENAI_CACHE[hash_key] = answer
+            set_openai_cache(hash_key, answer)
+            save_cache()
+            return answer
         
         return "SUPPERTIME is silent..."
     except Exception as e:
@@ -1596,6 +1617,9 @@ async def startup_event():
     monitor.snapshot()
     threading.Thread(target=monitor.run_loop, kwargs={"interval_sec": 2}, daemon=True).start()
 
+    # Start 24/7 SHA256 repository monitor (P1 FEATURE)
+    asyncio.create_task(schedule_repo_watch())
+    
     # Start resonance creation schedule
     schedule_resonance_creation()
     # Start identity reflection (self-awareness)

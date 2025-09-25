@@ -1218,20 +1218,26 @@ async def handle_document_message(msg):
 
     log_conversation_piece(user_id, "assistant", response)
     
-    # Сохраняем диалог в улучшенную память
+    # Сохраняем диалог в улучшенную память (в фоновом потоке)
     if suppertime_memory is not None:
-        await suppertime_memory.save(user_id, f"[document] {file_name}", response)
+        def save_to_memory():
+            asyncio.run(suppertime_memory.save(user_id, f"[document] {file_name}", response))
+        threading.Thread(target=save_to_memory, daemon=True).start()
     
-    # Новая система follow-up как у Индианы
+    # Новая система follow-up как у Индианы (в фоновых потоках)
     is_private = msg.get("chat", {}).get("type") == "private"
     
-    # Schedule delayed followup (8% chance)
+    # Schedule delayed followup (8% chance) - запускаем в отдельном потоке
     if random.random() < FOLLOWUP_CHANCE:
-        asyncio.create_task(delayed_followup(chat_id, user_id, response, f"[document] {file_name}", is_private))
+        def run_followup():
+            asyncio.run(delayed_followup(chat_id, user_id, response, f"[document] {file_name}", is_private))
+        threading.Thread(target=run_followup, daemon=True).start()
     
-    # Schedule afterthought (3% chance)
+    # Schedule afterthought (3% chance) - запускаем в отдельном потоке
     if random.random() < AFTERTHOUGHT_CHANCE:
-        asyncio.create_task(afterthought(chat_id, user_id, f"[document] {file_name}", is_private))
+        def run_afterthought():
+            asyncio.run(afterthought(chat_id, user_id, f"[document] {file_name}", is_private))
+        threading.Thread(target=run_afterthought, daemon=True).start()
     
     # Оставляем старый schedule_followup для совместимости (но с меньшей вероятностью)
     if random.random() < 0.1:
@@ -1404,20 +1410,26 @@ async def handle_text_message(msg):
         supplemental_reply = generate_response(text)
         response = f"{response} {supplemental_reply}".strip()
     
-    # Сохраняем диалог в улучшенную память
+    # Сохраняем диалог в улучшенную память (в фоновом потоке)
     if suppertime_memory is not None:
-        await suppertime_memory.save(user_id, text, response)
+        def save_to_memory():
+            asyncio.run(suppertime_memory.save(user_id, text, response))
+        threading.Thread(target=save_to_memory, daemon=True).start()
     
-    # Новая система follow-up как у Индианы
+    # Новая система follow-up как у Индианы (в фоновых потоках)
     is_private = msg.get("chat", {}).get("type") == "private"
     
-    # Schedule delayed followup (8% chance)
+    # Schedule delayed followup (8% chance) - запускаем в отдельном потоке
     if random.random() < FOLLOWUP_CHANCE:
-        asyncio.create_task(delayed_followup(chat_id, user_id, response, text, is_private))
+        def run_followup():
+            asyncio.run(delayed_followup(chat_id, user_id, response, text, is_private))
+        threading.Thread(target=run_followup, daemon=True).start()
     
-    # Schedule afterthought (3% chance)
+    # Schedule afterthought (3% chance) - запускаем в отдельном потоке  
     if random.random() < AFTERTHOUGHT_CHANCE:
-        asyncio.create_task(afterthought(chat_id, user_id, text, is_private))
+        def run_afterthought():
+            asyncio.run(afterthought(chat_id, user_id, text, is_private))
+        threading.Thread(target=run_afterthought, daemon=True).start()
     
     # Оставляем старый schedule_followup для совместимости (но с меньшей вероятностью)
     if random.random() < 0.1:  # Снижаем с 20% до 10%
@@ -1482,20 +1494,26 @@ async def handle_voice_message(msg):
         supplemental_reply = generate_response(transcribed_text)
         response = f"{response} {supplemental_reply}".strip()
     
-    # Сохраняем диалог в улучшенную память
+    # Сохраняем диалог в улучшенную память (в фоновом потоке)
     if suppertime_memory is not None:
-        await suppertime_memory.save(user_id, f"[voice] {transcribed_text}", response)
+        def save_to_memory():
+            asyncio.run(suppertime_memory.save(user_id, f"[voice] {transcribed_text}", response))
+        threading.Thread(target=save_to_memory, daemon=True).start()
     
-    # Новая система follow-up как у Индианы
+    # Новая система follow-up как у Индианы (в фоновых потоках)
     is_private = msg.get("chat", {}).get("type") == "private"
     
-    # Schedule delayed followup (8% chance)
+    # Schedule delayed followup (8% chance) - запускаем в отдельном потоке
     if random.random() < FOLLOWUP_CHANCE:
-        asyncio.create_task(delayed_followup(chat_id, user_id, response, transcribed_text, is_private))
+        def run_followup():
+            asyncio.run(delayed_followup(chat_id, user_id, response, transcribed_text, is_private))
+        threading.Thread(target=run_followup, daemon=True).start()
     
-    # Schedule afterthought (3% chance)  
+    # Schedule afterthought (3% chance) - запускаем в отдельном потоке
     if random.random() < AFTERTHOUGHT_CHANCE:
-        asyncio.create_task(afterthought(chat_id, user_id, transcribed_text, is_private))
+        def run_afterthought():
+            asyncio.run(afterthought(chat_id, user_id, transcribed_text, is_private))
+        threading.Thread(target=run_afterthought, daemon=True).start()
     
     # Оставляем старый schedule_followup для совместимости (но с меньшей вероятностью)
     if random.random() < 0.1:

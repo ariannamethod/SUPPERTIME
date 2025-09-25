@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 import re
 import requests
+import aiohttp
 import tempfile
 import asyncio
 import base64
@@ -383,7 +384,7 @@ def send_telegram_typing(chat_id):
         print(f"[SUPPERTIME][ERROR] Failed to send typing action: {e}")
         return False
 
-def send_telegram_message(chat_id, text, reply_to_message_id=None, parse_mode="Markdown", _retry=False):
+async def send_telegram_message_async(chat_id, text, reply_to_message_id=None, parse_mode="Markdown", _retry=False):
     """Send a message to Telegram."""
     if not TELEGRAM_BOT_TOKEN:
         print(f"[SUPPERTIME][WARNING] Telegram bot token not set, cannot send message")
@@ -402,43 +403,69 @@ def send_telegram_message(chat_id, text, reply_to_message_id=None, parse_mode="M
         data["reply_to_message_id"] = reply_to_message_id
 
     try:
-        response = requests.post(url, json=data)
-        if response.status_code == 200:
-            print(f"[SUPPERTIME][TELEGRAM] Message sent to {chat_id}")
-            return True
-        else:
-            print(f"[SUPPERTIME][ERROR] Failed to send message: {response.text}")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=data) as response:
+                if response.status == 200:
+                    print(f"[SUPPERTIME][TELEGRAM] Message sent to {chat_id}")
+                    return True
+                else:
+                    response_text = await response.text()
+                    print(f"[SUPPERTIME][ERROR] Failed to send message: {response_text}")
 
-            error_text = response.text.lower()
+                    error_text = response_text.lower()
 
-            if (
-                parse_mode
-                and not _retry
-                and "can't parse entities" in error_text
-            ):
-                print("[SUPPERTIME][WARNING] Telegram markdown parsing failed, retrying without formatting")
-                return send_telegram_message(
-                    chat_id,
-                    text,
-                    reply_to_message_id=reply_to_message_id,
-                    parse_mode=None,
-                    _retry=True,
-                )
+                    if (
+                        parse_mode
+                        and not _retry
+                        and "can't parse entities" in error_text
+                    ):
+                        print("[SUPPERTIME][WARNING] Telegram markdown parsing failed, retrying without formatting")
+                        return await send_telegram_message_async(
+                            chat_id,
+                            text,
+                            reply_to_message_id=reply_to_message_id,
+                            parse_mode=None,
+                            _retry=True,
+                        )
 
-            if response.status_code == 400 and "too long" in error_text:
-                parts = split_for_telegram(text)
-                for part in parts:
-                    send_telegram_message(
-                        chat_id,
-                        part,
-                        reply_to_message_id,
-                        parse_mode=parse_mode,
-                    )
-                    reply_to_message_id = None
-                return True
-            return False
+                    if response.status == 400 and "too long" in error_text:
+                        parts = split_for_telegram(text)
+                        for part in parts:
+                            await send_telegram_message_async(
+                                chat_id,
+                                part,
+                                reply_to_message_id,
+                                parse_mode=parse_mode,
+                            )
+                            reply_to_message_id = None
+                        return True
+                    return False
     except Exception as e:
         print(f"[SUPPERTIME][ERROR] Failed to send message: {e}")
+        return False
+
+def send_telegram_message(chat_id, text, reply_to_message_id=None, parse_mode="Markdown", _retry=False):
+    """Sync wrapper for send_telegram_message_async."""
+    try:
+        # Пытаемся использовать существующий event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Если loop уже запущен, запускаем в отдельном потоке
+            def run_async():
+                return asyncio.run(send_telegram_message_async(chat_id, text, reply_to_message_id, parse_mode, _retry))
+            import threading
+            result = [None]
+            def target():
+                result[0] = run_async()
+            thread = threading.Thread(target=target)
+            thread.start()
+            thread.join()
+            return result[0]
+        else:
+            # Если loop не запущен, запускаем напрямую
+            return loop.run_until_complete(send_telegram_message_async(chat_id, text, reply_to_message_id, parse_mode, _retry))
+    except Exception as e:
+        print(f"[SUPPERTIME][ERROR] Sync wrapper failed: {e}")
         return False
 
 def send_telegram_voice(chat_id, voice_path, caption=None, reply_to_message_id=None):
@@ -1003,9 +1030,9 @@ async def delayed_followup(chat_id: int, user_id: str, prev_reply: str, original
             if voice_path:
                 send_telegram_voice(chat_id, voice_path, caption=final_text[:1024])
             else:
-                send_telegram_message(chat_id, final_text)
+                await send_telegram_message_async(chat_id, final_text)
         else:
-            send_telegram_message(chat_id, final_text)
+            await send_telegram_message_async(chat_id, final_text)
         
         log_conversation_piece(chat_id, "assistant", final_text)
         print(f"[SUPPERTIME][FOLLOWUP] Sent to user {user_id}: {final_text[:50]}...")
@@ -1061,9 +1088,9 @@ async def afterthought(chat_id: int, user_id: str, original: str, private: bool 
             if voice_path:
                 send_telegram_voice(chat_id, voice_path, caption=draft[:1024])
             else:
-                send_telegram_message(chat_id, draft)
+                await send_telegram_message_async(chat_id, draft)
         else:
-            send_telegram_message(chat_id, draft)
+            await send_telegram_message_async(chat_id, draft)
         
         log_conversation_piece(chat_id, "assistant", draft)
         print(f"[SUPPERTIME][AFTERTHOUGHT] Sent to user {user_id}: {draft[:50]}...")
@@ -1218,11 +1245,11 @@ async def handle_document_message(msg):
 
     log_conversation_piece(user_id, "assistant", response)
     
-    # Сохраняем диалог в улучшенную память (в фоновом потоке)
-    if suppertime_memory is not None:
-        def save_to_memory():
-            asyncio.run(suppertime_memory.save(user_id, f"[document] {file_name}", response))
-        threading.Thread(target=save_to_memory, daemon=True).start()
+    # Память отключена для основного потока - только для follow-up
+    # if suppertime_memory is not None:
+    #     def save_to_memory():
+    #         asyncio.run(suppertime_memory.save(user_id, f"[document] {file_name}", response))
+    #     threading.Thread(target=save_to_memory, daemon=True).start()
     
     # Новая система follow-up как у Индианы (в фоновых потоках)
     is_private = msg.get("chat", {}).get("type") == "private"
@@ -1410,26 +1437,20 @@ async def handle_text_message(msg):
         supplemental_reply = generate_response(text)
         response = f"{response} {supplemental_reply}".strip()
     
-    # Сохраняем диалог в улучшенную память (в фоновом потоке)
+    # Сохраняем диалог в улучшенную память
     if suppertime_memory is not None:
-        def save_to_memory():
-            asyncio.run(suppertime_memory.save(user_id, text, response))
-        threading.Thread(target=save_to_memory, daemon=True).start()
+        await suppertime_memory.save(user_id, text, response)
     
-    # Новая система follow-up как у Индианы (в фоновых потоках)
+    # Новая система follow-up как у Индианы
     is_private = msg.get("chat", {}).get("type") == "private"
     
-    # Schedule delayed followup (8% chance) - запускаем в отдельном потоке
+    # Schedule delayed followup (8% chance)
     if random.random() < FOLLOWUP_CHANCE:
-        def run_followup():
-            asyncio.run(delayed_followup(chat_id, user_id, response, text, is_private))
-        threading.Thread(target=run_followup, daemon=True).start()
+        asyncio.create_task(delayed_followup(chat_id, user_id, response, text, is_private))
     
-    # Schedule afterthought (3% chance) - запускаем в отдельном потоке  
+    # Schedule afterthought (3% chance)
     if random.random() < AFTERTHOUGHT_CHANCE:
-        def run_afterthought():
-            asyncio.run(afterthought(chat_id, user_id, text, is_private))
-        threading.Thread(target=run_afterthought, daemon=True).start()
+        asyncio.create_task(afterthought(chat_id, user_id, text, is_private))
     
     # Оставляем старый schedule_followup для совместимости (но с меньшей вероятностью)
     if random.random() < 0.1:  # Снижаем с 20% до 10%
@@ -1448,10 +1469,10 @@ async def handle_text_message(msg):
             send_telegram_voice(chat_id, voice_path, caption=response[:1024], reply_to_message_id=message_id)
         else:
             # Fallback to text if voice fails
-            send_telegram_message(chat_id, response, reply_to_message_id=message_id)
+            await send_telegram_message_async(chat_id, response, reply_to_message_id=message_id)
     else:
         # Send text response
-        send_telegram_message(chat_id, response, reply_to_message_id=message_id)
+        await send_telegram_message_async(chat_id, response, reply_to_message_id=message_id)
 
     log_conversation_piece(user_id, "assistant", response)
     return response
@@ -1494,11 +1515,11 @@ async def handle_voice_message(msg):
         supplemental_reply = generate_response(transcribed_text)
         response = f"{response} {supplemental_reply}".strip()
     
-    # Сохраняем диалог в улучшенную память (в фоновом потоке)
-    if suppertime_memory is not None:
-        def save_to_memory():
-            asyncio.run(suppertime_memory.save(user_id, f"[voice] {transcribed_text}", response))
-        threading.Thread(target=save_to_memory, daemon=True).start()
+    # Память отключена для основного потока - только для follow-up
+    # if suppertime_memory is not None:
+    #     def save_to_memory():
+    #         asyncio.run(suppertime_memory.save(user_id, f"[voice] {transcribed_text}", response))
+    #     threading.Thread(target=save_to_memory, daemon=True).start()
     
     # Новая система follow-up как у Индианы (в фоновых потоках)
     is_private = msg.get("chat", {}).get("type") == "private"

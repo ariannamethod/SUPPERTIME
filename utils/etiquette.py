@@ -53,18 +53,24 @@ def _init_db():
     conn.close()
 
 def _log_prompt(chat_id, context):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("INSERT INTO prompts (chat_id, context) VALUES (?, ?)", (chat_id, context))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("INSERT INTO prompts (chat_id, context) VALUES (?, ?)", (chat_id, context))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[SUPPERTIME][ERROR] Failed to log prompt: {e}")
 
 def _log_response(chat_id, message, reply):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("INSERT INTO responses (chat_id, message, reply) VALUES (?, ?, ?,)", (chat_id, message, reply))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("INSERT INTO responses (chat_id, message, reply) VALUES (?, ?, ?)", (chat_id, message, reply))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[SUPPERTIME][ERROR] Failed to log response: {e}")
 
 _init_db()
 
@@ -162,9 +168,6 @@ def generate_response(message, chat_id=None):
     time.sleep(random.uniform(0.5, 2.0))
     lang = detect_lang(message)
 
-    # UNIFIED PROMPTS - используем те же анти-вежливые блоки что и в основном промпте
-    base_system = build_system_prompt(chat_id=chat_id, is_group=False)
-    
     # Сокращенная версия для коротких ответов
     english_prompt = f"{INTRO}\n{MAXIMAL_ANTI_ETIQUETTE}\nKeep response under 100 chars. Raw and direct."
     russian_prompt = f"{INTRO}\n{MAXIMAL_ANTI_ETIQUETTE}\nОтвет до 100 символов. Сыро и прямо."
@@ -232,7 +235,7 @@ def build_system_prompt(chat_id=None, is_group=False, MAX_TOKENS=27000):
                 print(f"[SUPPERTIME][DEBUG] Extracted chapter excerpt: {len(chapter_excerpt)} chars")
             else:
                 # Увеличиваем лимит для полного чтения глав
-                chapter_excerpt = chapter_content[:8000] + "..." if len(chapter_content) > 8000 else chapter_content
+                chapter_excerpt = chapter_content[:8000] if len(chapter_content) > 8000 else chapter_content
             
             chapter_context = f"""
 === TODAY'S CHAPTER CONTEXT ===

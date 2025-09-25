@@ -225,8 +225,8 @@ def build_system_prompt(chat_id=None, is_group=False, MAX_TOKENS=27000):
                             break
                     elif in_chapter:
                         chapter_lines.append(line)
-                           if len('\n'.join(chapter_lines)) > 6000:  # Максимум 6KB на главу
-                               break
+                        if len('\n'.join(chapter_lines)) > 6000:  # Максимум 6KB на главу
+                            break
                 
                 chapter_excerpt = '\n'.join(chapter_lines[:200])  # Максимум 200 строк
                 print(f"[SUPPERTIME][DEBUG] Extracted chapter excerpt: {len(chapter_excerpt)} chars")

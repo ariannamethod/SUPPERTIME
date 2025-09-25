@@ -225,14 +225,14 @@ def build_system_prompt(chat_id=None, is_group=False, MAX_TOKENS=27000):
                             break
                     elif in_chapter:
                         chapter_lines.append(line)
-                        if len('\n'.join(chapter_lines)) > 2000:  # Максимум 2KB на главу
-                            break
+                           if len('\n'.join(chapter_lines)) > 6000:  # Максимум 6KB на главу
+                               break
                 
-                chapter_excerpt = '\n'.join(chapter_lines[:50])  # Максимум 50 строк
+                chapter_excerpt = '\n'.join(chapter_lines[:200])  # Максимум 200 строк
                 print(f"[SUPPERTIME][DEBUG] Extracted chapter excerpt: {len(chapter_excerpt)} chars")
             else:
-                # Обычная обрезка для коротких глав
-                chapter_excerpt = chapter_content[:1500] + "..." if len(chapter_content) > 1500 else chapter_content
+                   # Увеличиваем лимит для полного чтения глав
+                   chapter_excerpt = chapter_content[:8000] + "..." if len(chapter_content) > 8000 else chapter_content
             
             chapter_context = f"""
 === TODAY'S CHAPTER CONTEXT ===
@@ -310,18 +310,18 @@ Literary processing unavailable - you exist in reduced literary awareness.
             for line in readme_lines:
                 if line.startswith('### ') and any(keyword in line.lower() for keyword in ['new in', 'philosophy', 'usage', 'commands']):
                     if current_section and in_key_section:
-                        key_sections.extend(current_section[:10])  # Максимум 10 строк на секцию
+                        key_sections.extend(current_section[:25])  # Максимум 25 строк на секцию
                     current_section = [line]
                     in_key_section = True
                 elif in_key_section:
                     current_section.append(line)
-                    if len(current_section) > 15:  # Ограничиваем размер секции
+                    if len(current_section) > 30:  # Ограничиваем размер секции
                         break
             
             if current_section and in_key_section:
-                key_sections.extend(current_section[:10])
+                key_sections.extend(current_section[:25])
             
-            readme_summary = '\n'.join(key_sections[:30])  # Максимум 30 строк
+            readme_summary = '\n'.join(key_sections[:100])  # Максимум 100 строк
             readme_context = f"""
 === YOUR PROJECT DESCRIPTION ===
 {readme_summary}

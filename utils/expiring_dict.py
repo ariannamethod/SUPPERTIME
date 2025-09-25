@@ -3,6 +3,7 @@ import base64
 import os
 import pickle
 import sqlite3
+import threading
 import time
 from collections.abc import MutableMapping
 from typing import Optional, Any
@@ -51,6 +52,7 @@ class ExpiringCache(MutableMapping):
         self.db_path = db_path
         self.namespace = namespace or self.__class__.__name__
         self._prefix = f"{self.namespace}::"
+        self._lock = threading.Lock()  # P1 FIX: Thread safety
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
@@ -74,32 +76,34 @@ class ExpiringCache(MutableMapping):
         return stored_key[len(self._prefix) :]
 
     def set(self, key: str, value: Any):
-        ts = time.time()
-        encoded_value = _serialize(value)
-        scoped_key = self._scoped_key(str(key))
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO expiring_cache (key, value, ts) VALUES (?, ?, ?)",
-                (scoped_key, encoded_value, ts)
-            )
-            conn.commit()
+        with self._lock:  # P1 FIX: Thread-safe write
+            ts = time.time()
+            encoded_value = _serialize(value)
+            scoped_key = self._scoped_key(str(key))
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO expiring_cache (key, value, ts) VALUES (?, ?, ?)",
+                    (scoped_key, encoded_value, ts)
+                )
+                conn.commit()
 
     def _get_with_timestamp(self, key: str) -> Optional[tuple[Any, float, bool]]:
-        now = time.time()
-        scoped_key = self._scoped_key(str(key))
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute(
-                "SELECT value, ts FROM expiring_cache WHERE key = ?",
-                (scoped_key,)
-            ).fetchone()
-        if not row:
-            return None
-        value, ts = row
-        if now - ts > self.ttl:
-            self.delete(key)
-            return None
-        decoded, legacy = _deserialize(value)
-        return decoded, ts, legacy
+        with self._lock:  # P1 FIX: Thread-safe read
+            now = time.time()
+            scoped_key = self._scoped_key(str(key))
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    "SELECT value, ts FROM expiring_cache WHERE key = ?",
+                    (scoped_key,)
+                ).fetchone()
+            if not row:
+                return None
+            value, ts = row
+            if now - ts > self.ttl:
+                self.delete(key)
+                return None
+            decoded, legacy = _deserialize(value)
+            return decoded, ts, legacy
 
     def get(self, key: str, default: Any = None) -> Any:
         result = self._get_with_timestamp(key)

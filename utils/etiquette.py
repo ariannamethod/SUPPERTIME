@@ -75,10 +75,15 @@ def _log_response(chat_id, message, reply):
 _init_db()
 
 # --- Helpers ---
-def detect_lang(text):
-    if any(c in text for c in "ёйцукенгшщзхъфывапролджэячсмитьбю"):
-        return "ru"
-    return "en"
+# P2 FIX: Import detect_lang from main.py to avoid duplication
+try:
+    from main import detect_lang
+except ImportError:
+    # Fallback if circular import
+    def detect_lang(text):
+        if any(c in text for c in "ёйцукенгшщзхъфывапролджэячсмитьбю"):
+            return "ru"
+        return "en"
 
 # --- PROMPT blocks ---
 INTRO = (

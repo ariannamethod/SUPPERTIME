@@ -1,4 +1,4 @@
-# mcp-types
+# postcodex: former codex cli
 
 Types for Model Context Protocol. Inspired by https://crates.io/crates/lsp-types.
 

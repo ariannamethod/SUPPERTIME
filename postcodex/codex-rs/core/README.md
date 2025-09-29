@@ -1,4 +1,4 @@
-# codex-core
+# postcodex: former codex cli
 
 This crate implements the business logic for Codex. It is designed to be used by the various Codex UIs written in Rust.
 

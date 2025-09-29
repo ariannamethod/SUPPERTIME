@@ -1,4 +1,4 @@
-# Codex CLI (Rust Implementation)
+# postcodex: former codex cli
 
 We provide Codex CLI as a standalone, native executable to ensure a zero-dependency install.
 

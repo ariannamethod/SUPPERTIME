@@ -1,4 +1,4 @@
-# npm releases
+# postcodex: former codex cli
 
 Run the following:
 

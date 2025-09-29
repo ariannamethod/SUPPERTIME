@@ -1,4 +1,4 @@
-<h1 align="center">OpenAI Codex CLI</h1>
+# postcodex: former codex cli
 <p align="center">Lightweight coding agent that runs in your terminal</p>
 
 <p align="center"><code>npm i -g @openai/codex</code></p>

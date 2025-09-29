@@ -15,6 +15,9 @@ import threading
 from pathlib import Path
 from typing import Dict, List, Set, Optional, Tuple
 
+# PostCodex использует тот же OPENAI_API_KEY что и SUPPERTIME
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 class PostCodexGuardian:
     """
     Спящий демон-страж, превращенный из Кодекса-цензора.
